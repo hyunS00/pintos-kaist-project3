@@ -69,7 +69,7 @@ sema_down (struct semaphore *sema) {
 		/* customed */
 		// list_push_back (&sema->waiters, &thread_current ()->elem);
 		list_insert_ordered(&sema->waiters, &thread_current()->elem, list_higher_priority, NULL);
-		/* customed */
+		
 		thread_block ();
 	}
 	sema->value--;
@@ -120,9 +120,7 @@ sema_up (struct semaphore *sema) {
 		thread_unblock (list_entry (list_pop_front (&sema->waiters), struct thread, elem));
 	}
 	sema->value++;
-
 	preemption();
-	
 	intr_set_level (old_level);
 }
 
@@ -194,26 +192,25 @@ lock_init (struct lock *lock) {
    we need to sleep. */
 void
 lock_acquire (struct lock *lock) {
-	
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
-	
-	/* customed */
+		
 	struct thread *curr = thread_current();
-	enum intr_level old_level = intr_disable();
-	
-	if (lock -> holder != NULL && curr->priority > lock->holder->priority)
-	{
-		curr->wait_on_lock = lock;
-		list_insert_ordered(&lock->holder->donations, &curr->d_elem, list_higher_priority, NULL);
-		donate(curr); 
-	}
-	intr_set_level(old_level);
 
+	/* ====================== customed for advanced ======================*/
+	if (!thread_mlfqs)
+	{	
+		if (lock -> holder != NULL && curr->priority > lock->holder->priority)
+		{
+			curr->wait_on_lock = lock;
+			list_insert_ordered(&lock->holder->donations, &curr->d_elem, list_higher_priority, NULL);
+			donate(curr); 
+		}
+	}
 	sema_down (&lock->semaphore); //
-	curr->wait_on_lock = NULL;
 	lock->holder = curr;
+	curr->wait_on_lock = NULL;
 }
 
 
@@ -247,31 +244,34 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
-	/* customed */
-	enum intr_level old_level = intr_disable ();
-	lock->holder = NULL;
-	
-	// donation_list에서 제거
-	struct thread *curr = thread_current();
-	struct list_elem *donator_number;
-	for (donator_number = list_begin(&curr->donations); donator_number != list_end(&curr->donations);)
+	/* ====================== customed for advanced ======================*/
+	if (!thread_mlfqs)
 	{
-		struct thread *front = list_entry(donator_number, struct thread, d_elem);
-		if (front->wait_on_lock == lock)
+		enum intr_level old_level = intr_disable ();
+		
+		// donation_list에서 제거
+		struct thread *curr = thread_current();
+		struct list_elem *donator_number;
+		for (donator_number = list_begin(&curr->donations); donator_number != list_end(&curr->donations);)
 		{
-			donator_number = list_remove(donator_number);
+			struct thread *front = list_entry(donator_number, struct thread, d_elem);
+			if (front->wait_on_lock == lock)
+			{
+				donator_number = list_remove(donator_number);
+			}
+			else
+			{
+				donator_number = list_next(donator_number);
+			}
 		}
-		else
-		{
-			donator_number = list_next(donator_number);
-		}
-	}
-	
-	// donations_list 정렬 이후 우선순위 비교해서 교환
-	update_priority();
+		
+		// donations_list 정렬 이후 우선순위 비교해서 교환
+		update_priority();
 
-	intr_set_level(old_level);
-	sema_up (&lock->semaphore);
+		intr_set_level(old_level);
+	}
+		lock->holder = NULL;
+		sema_up (&lock->semaphore);
 }
 
 /* Returns true if the current thread holds LOCK, false
