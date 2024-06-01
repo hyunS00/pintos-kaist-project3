@@ -2,6 +2,7 @@
 #define VM_VM_H
 #include <stdbool.h>
 #include "threads/palloc.h"
+#include "include/lib/kernel/hash.h"
 
 enum vm_type {
 	/* page not initialized */
@@ -59,6 +60,28 @@ struct page {
 	};
 };
 
+struct vm_entry {
+	enum vm_type type;
+	void *vaddr;
+	bool writable;
+
+	bool is_loaded;
+	struct file *file;
+
+	/* Memory Mapped File에서 다룰 예정 */
+	struct list_elem mmap_elem;
+
+	size_t offset;
+	size_t read_bytes;
+	size_t zero_bytes;
+
+	/* Swapping 과제에서 다룰 예정 */
+	size_t swap_slot;
+
+	/* vm_entry를 위한 자료구조 부분에서 다룰 예정 */
+	struct hash_elem hash_elem;
+};
+
 /* The representation of "frame" */
 struct frame {
 	void *kva;
@@ -85,6 +108,7 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
+	struct hash spt;
 };
 
 #include "threads/thread.h"

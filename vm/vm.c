@@ -16,6 +16,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -174,6 +175,8 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	if (!hash_init(&spt->spt, hash_int, vm_entry_less, NULL))
+		exit(-1);
 }
 
 /* Copy supplemental page table from src to dst */
@@ -188,3 +191,5 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
 }
+
+
