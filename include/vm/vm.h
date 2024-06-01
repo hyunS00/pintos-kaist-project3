@@ -85,7 +85,20 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
+	struct hash *spt;
 };
+
+struct vm_entry {
+	enum vm_type;					// page 타입 
+	void *vaddr;					// 가상 주소
+	bool writable;					// write 가능 여부
+	bool is_loaded;					// 물리 메모리에 로드되었는지 여부
+	struct file *file;				// 매핑된 파일 (파일 타입인 경우)
+	off_t offset;					// 파일 내 offset (파일 타입인 경우)
+	size_t read_bytes;				// 읽어야 할 바이트 수 (파일 타입인 경우)
+	size_t zero_bytes;				// 0으로 채울 바이트 수 (파일 타입인 경우)
+	struct hash_elem hash_elem;		// Hash table Element
+}
 
 #include "threads/thread.h"
 void supplemental_page_table_init (struct supplemental_page_table *spt);
