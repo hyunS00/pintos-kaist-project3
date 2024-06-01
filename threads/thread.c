@@ -12,6 +12,7 @@
 #include "threads/vaddr.h"
 #include "intrinsic.h"
 #include "threads/fp-ops.h"
+#include "kernel/hash.h"
 // #include "threads/fixed_point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -243,6 +244,8 @@ thread_create (const char *name, int priority,
 	t->nex_fd = 2;
 	for (size_t i = 2; i < MAX_FDT; i++)
 		t->fdt[i] = NULL;
+
+
 
 	/* Add to run queue. */
 	thread_unblock (t);

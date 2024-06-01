@@ -214,6 +214,7 @@ process_exec (void *f_name) {
 	// char *file_name = f_name;
 	bool success;
 
+	supplemental_page_table_init(&thread_current()->spt);
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */

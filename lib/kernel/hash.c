@@ -8,6 +8,8 @@
 #include "hash.h"
 #include "../debug.h"
 #include "threads/malloc.h"
+#include "vm/vm.h"
+#include "kernel/hash.h"
 
 #define list_elem_to_hash_elem(LIST_ELEM)                       \
 	list_entry(LIST_ELEM, struct hash_elem, list_elem)
@@ -392,3 +394,12 @@ remove_elem (struct hash *h, struct hash_elem *e) {
 	list_remove (&e->list_elem);
 }
 
+/* vm_entry a가 페이지 b보다 앞서면 true를 반환합니다. */
+bool
+vm_entry_less (const struct hash_elem *a_,
+           const struct hash_elem *b_, void *aux UNUSED) {
+  const struct vm_entry *a = hash_entry (a_, struct vm_entry, hash_elem);
+  const struct vm_entry *b = hash_entry (b_, struct vm_entry, hash_elem);
+
+  return a->vaddr < b->vaddr;
+}
