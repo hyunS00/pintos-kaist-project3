@@ -47,6 +47,8 @@ struct page {
 	struct frame *frame;   /* Back reference for frame */
 
 	/* Your implementation */
+	struct vm_entry *vme;
+	struct hash_elem hash_elem;
 
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
@@ -79,14 +81,22 @@ struct vm_entry {
 	size_t swap_slot;
 
 	/* vm_entry를 위한 자료구조 부분에서 다룰 예정 */
-	struct hash_elem hash_elem;
+	/* vm_entry에서 hash_elem을 사용하는 대신 
+		구현의 편의성을 위해 
+		page 구조체에 hash_elem을 넣어 자료구조를 관리한다. */
+	// struct hash_elem hash_elem;
 };
 
 /* The representation of "frame" */
 struct frame {
 	void *kva;
 	struct page *page;
+
+	/* frame table에 접근하기 위해 */
+	struct list_elem frame_elem;
 };
+
+struct list frame_table;
 
 /* The function table for page operations.
  * This is one way of implementing "interface" in C.
@@ -132,5 +142,10 @@ bool vm_alloc_page_with_initializer (enum vm_type type, void *upage,
 void vm_dealloc_page (struct page *page);
 bool vm_claim_page (void *va);
 enum vm_type page_get_type (struct page *page);
+
+/* functions added. */
+unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
+bool page_less (const struct hash_elem *a_,
+           const struct hash_elem *b_, void *aux UNUSED);
 
 #endif  /* VM_VM_H */

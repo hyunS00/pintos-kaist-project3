@@ -53,6 +53,7 @@ hash_clear (struct hash *h, hash_action_func *destructor) {
 	size_t i;
 
 	for (i = 0; i < h->bucket_cnt; i++) {
+		/* list *buckets 안에 hash_elem이 들어있다. */
 		struct list *bucket = &h->buckets[i];
 
 		if (destructor != NULL)
@@ -393,12 +394,14 @@ remove_elem (struct hash *h, struct hash_elem *e) {
 	list_remove (&e->list_elem);
 }
 
-/* Returns true if page a precedes page b. */
-bool
-vm_entry_less (const struct hash_elem *a_,
-           const struct hash_elem *b_, void *aux UNUSED) {
-  const struct vm_entry *a = hash_entry (a_, struct vm_entry, hash_elem);
-  const struct vm_entry *b = hash_entry (b_, struct vm_entry, hash_elem);
-
-  return a->vaddr < b->vaddr;
+void 
+hash_free_func (struct hash_elem *e, void *aux) {
+	/* hash_elem에 맞는 page를 찾는다. */
+	struct page *p = hash_entry(e, struct page, hash_elem);
+	
+	free(p->vme);
+	/* page type에 맞는 destroy function을 부른다. */
+	destroy(p);
+	free(p);
+	free(e);
 }
