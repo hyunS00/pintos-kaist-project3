@@ -5,6 +5,7 @@
 #include "vm/inspect.h"
 #include "kernel/hash.h"
 #include "threads/vaddr.h"
+#include "threads/mmu.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -83,6 +84,9 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 		struct page *new_page = (struct page *)malloc(sizeof(struct page));
 		if (new_page == NULL)
 			goto err;
+		
+		/* page round down */
+		upage = pg_round_down(upage);
 
 		/* type에 맞게 uninit page를 생성한다. */
 		switch (VM_TYPE(type)) {
@@ -146,6 +150,7 @@ spt_insert_page (struct supplemental_page_table *spt UNUSED,
 	return succ;
 }
 
+/* spt에서 한 page씩 삭제한다. */
 void
 spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
 	vm_dealloc_page (page);
@@ -167,7 +172,7 @@ static struct frame *
 vm_evict_frame (void) {
 	struct frame *victim UNUSED = vm_get_victim ();
 	/* TODO: swap out the victim and return the evicted frame. */
-
+	/* 여기서 swap out 구현 */
 	return NULL;
 }
 
@@ -177,8 +182,16 @@ vm_evict_frame (void) {
  * space.*/
 static struct frame *
 vm_get_frame (void) {
-	struct frame *frame = NULL;
 	/* TODO: Fill this function. */
+	struct frame *frame = (struct frame *) malloc(sizeof(struct frame));
+	frame->kva = palloc_get_page(PAL_USER);
+
+	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
+		일단 PANIC(todo)로 둔다. */
+	if (frame->kva == NULL) {
+		/* vm_evict_frame 호출 */
+		PANIC("todo");
+	}
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
@@ -202,10 +215,26 @@ vm_handle_wp (struct page *page UNUSED) {
 bool
 vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
+	
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
-	struct page *page = NULL;
+
+	/* spt에서 해당하는 page를 찾아온다. */
+	addr = pg_round_down(addr);
+	struct page *page = spt_find_page(spt, addr);
+
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+
+	/* 1. 유효한 페이지인지 확인한다. */
+	if (!user || !page)
+		return false;
+
+	/* 2. Bogus fault인지 확인한다. */
+	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
+			swap-out된 페이지에 대한 PF이다. */
+	if (page->type != VM_UNINIT) {
+		return false;
+	}
 
 	return vm_do_claim_page (page);
 }
@@ -221,8 +250,15 @@ vm_dealloc_page (struct page *page) {
 /* Claim the page that allocate on VA. */
 bool
 vm_claim_page (void *va UNUSED) {
-	struct page *page = NULL;
 	/* TODO: Fill this function */
+	
+	struct thread *curr = thread_current();
+
+	va = pg_round_down(va);
+	struct page *page = spt_find_page(&curr->spt, va);
+	if (page == NULL) {
+		return false;
+	}
 
 	return vm_do_claim_page (page);
 }
@@ -237,6 +273,14 @@ vm_do_claim_page (struct page *page) {
 	page->frame = frame;
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
+	struct thread *t = thread_current();
+	
+	/* 이미 page - frame이 매핑되어 있으면 다시 매핑해줄 필요가 없다. */
+	if (pml4_get_page(t->pml4, page->va) != NULL)
+		return false;
+
+	/* page - frame 매핑 */
+	pml4_set_page(t->pml4, page->va, frame->kva, page->writable);
 
 	return swap_in (page, frame->kva);
 }

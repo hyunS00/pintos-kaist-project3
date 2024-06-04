@@ -47,8 +47,11 @@ struct page {
 	struct frame *frame;   /* Back reference for frame */
 
 	/* Your implementation */
-	struct vm_entry *vme;
 	struct hash_elem hash_elem;
+
+	/* 공통 필드 */
+	enum vm_type type;
+	bool writable;
 
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
@@ -60,31 +63,6 @@ struct page {
 		struct page_cache page_cache;
 #endif
 	};
-};
-
-struct vm_entry {
-	enum vm_type type;
-	void *vaddr;
-	bool writable;
-
-	bool is_loaded;
-	struct file *file;
-
-	/* Memory Mapped File에서 다룰 예정 */
-	struct list_elem mmap_elem;
-
-	size_t offset;
-	size_t read_bytes;
-	size_t zero_bytes;
-
-	/* Swapping 과제에서 다룰 예정 */
-	size_t swap_slot;
-
-	/* vm_entry를 위한 자료구조 부분에서 다룰 예정 */
-	/* vm_entry에서 hash_elem을 사용하는 대신 
-		구현의 편의성을 위해 
-		page 구조체에 hash_elem을 넣어 자료구조를 관리한다. */
-	// struct hash_elem hash_elem;
 };
 
 /* The representation of "frame" */

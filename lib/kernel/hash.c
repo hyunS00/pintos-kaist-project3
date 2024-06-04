@@ -399,7 +399,6 @@ hash_free_func (struct hash_elem *e, void *aux) {
 	/* hash_elem에 맞는 page를 찾는다. */
 	struct page *p = hash_entry(e, struct page, hash_elem);
 	
-	free(p->vme);
 	/* page type에 맞는 destroy function을 부른다. */
 	destroy(p);
 	free(p);

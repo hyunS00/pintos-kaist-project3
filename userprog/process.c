@@ -213,7 +213,7 @@ int
 process_exec (void *f_name) {
 	// char *file_name = f_name;
 	bool success;
-	supplemental_page_table_init (&thread_current ()->spt);
+	// supplemental_page_table_init (&thread_current ()->spt);
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
@@ -725,6 +725,38 @@ lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
+
+	/* load_segment (from userprog.) 가져옴 */
+	/* aux에 저장해놓은 필드들을 이제 쓴다. */
+	struct file_page *fp = (struct file_page *)aux;
+	struct file *file = fp->file;
+	off_t ofs = fp->offset;
+	uint32_t read_bytes = fp->read_bytes;
+	uint32_t zero_bytes = fp->zero_bytes;
+	
+	file_seek (file, ofs);
+
+	/* Do calculate how to fill this page.
+	* We will read PAGE_READ_BYTES bytes from FILE
+	* and zero the final PAGE_ZERO_BYTES bytes. */
+	size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+	size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+	/* 실제로 파일을 읽어와서 페이지에 매핑된 물리 프레임에 로드한다. */
+	uint8_t *kva = page->frame->kva;
+	if (kva == NULL)
+		return false;
+
+	/* 읽기 실패 */
+	if (file_read (file, kva, page_read_bytes) != (int) page_read_bytes)
+		return false;
+
+	memset (kva + page_read_bytes, 0, page_zero_bytes);
+
+	/* 더이상 aux는 쓰이지 않는다. */
+	free(aux);
+
+	return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -748,6 +780,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	ASSERT (pg_ofs (upage) == 0);
 	ASSERT (ofs % PGSIZE == 0);
 
+	/* page round down */
+	upage = pg_round_down(upage);
 	while (read_bytes > 0 || zero_bytes > 0) {
 		/* Do calculate how to fill this page.
 		 * We will read PAGE_READ_BYTES bytes from FILE
@@ -756,16 +790,29 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
-		/* VM_ANON -> VM_FILE로 바꿈 */
-		if (!vm_alloc_page_with_initializer (VM_FILE, upage,
-					writable, lazy_load_segment, aux))
+		struct file_page *aux = (struct file_page *)malloc(sizeof(struct file_page));
+		aux->file = file;
+		aux->offset = ofs;
+		aux->read_bytes = read_bytes;
+		aux->zero_bytes = zero_bytes;
+
+		/* 지금 실행 파일에 대해 세그먼트 설정을 해주고 있다.
+			만약 FILE 타입으로 초기화를 해주면 swap-out 되었을 때 원본 파일의 내용이 수정된다.
+			따라서 이를 막기 위해 ANON 타입으로 초기화해준다.
+				Why? ANON 타입으로 초기화되면 변경 사항이 디스크 */
+		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
+					writable, lazy_load_segment, aux)) {
+			free(aux);
 			return false;
+		}
 
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		/* page마다 어디서부터 읽을지를 offset으로 관리하므로
+			ofs를 page_read_byte만큼 올려준다. */
+		ofs += page_read_bytes;
 	}
 	return true;
 }
@@ -780,6 +827,26 @@ setup_stack (struct intr_frame *if_) {
 	 * TODO: If success, set the rsp accordingly.
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
+
+	/* setup_stack (from userprog) */
+	/* stack_bottom에 해당하는 공간에 페이지를 할당한다. 
+		일단은 uninit으로. */
+	/* round_down 안하는 이유?
+		stack_bottom에 해당하는 공간에 페이지를 할당해주어야 하므로 
+		round_down하면 안된다. */
+	success = vm_alloc_page(VM_ANON, stack_bottom, true);
+
+	if (success) {
+		/* 바로 로드 요청을 함으로써 ANON 타입 page로 만들어준다. */
+		success = vm_claim_page(stack_bottom);
+		if (success)
+			if_->rsp = USER_STACK;
+		else {
+			/* 너무 억지코드 .. */
+			struct page *page = spt_find_page(&thread_current()->spt, stack_bottom);
+			vm_dealloc_page(page);
+		}
+	}
 
 	return success;
 }
