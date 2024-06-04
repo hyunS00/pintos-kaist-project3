@@ -90,12 +90,12 @@ err:
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
-	struct page *page = NULL;
+	struct page page;
 	/* TODO: Fill this function. */
 	struct hash_elem *e;
-	page->va = pg_round_down(va);
+	page.va = pg_round_down(va);
 
-	e = hash_find(&spt->ht, &page->hash_elem);
+	e = hash_find(&spt->ht, &page.hash_elem);
 
 	return e != NULL ? hash_entry(e, struct page, hash_elem) : NULL;
 }
@@ -244,7 +244,7 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
-	hash_init(spt->ht, page_hash, page_less, NULL);
+	hash_init(&spt->ht, page_hash, page_less, NULL);
 }
 
 /* Copy supplemental page table from src to dst */
