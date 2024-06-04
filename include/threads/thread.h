@@ -1,3 +1,6 @@
+#define USERPROG
+#define VM
+
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
@@ -11,7 +14,7 @@
 #include "vm/vm.h"
 #endif
 
-#define USERPROG
+
 #define MAX_FDT	128
 #define MIN(a, b)	(((a) < (b)) ? (a) : (b))
 /* States in a thread's life cycle. */

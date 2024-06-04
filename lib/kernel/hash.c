@@ -8,6 +8,7 @@
 #include "hash.h"
 #include "../debug.h"
 #include "threads/malloc.h"
+#include "vm/vm.h"
 
 #define list_elem_to_hash_elem(LIST_ELEM)                       \
 	list_entry(LIST_ELEM, struct hash_elem, list_elem)
@@ -275,7 +276,7 @@ uint64_t
 hash_int (int i) {
 	return hash_bytes (&i, sizeof i);
 }
-
+
 /* Returns the bucket in H that E belongs in. */
 static struct list *
 find_bucket (struct hash *h, struct hash_elem *e) {
@@ -392,3 +393,25 @@ remove_elem (struct hash *h, struct hash_elem *e) {
 	list_remove (&e->list_elem);
 }
 
+bool page_less (struct hash_elem *a, struct hash_elem *b, void *aux)
+{
+  const struct page *a_ = hash_entry(a, struct page, hash_elem);
+  const struct page *b_ = hash_entry(b, struct page, hash_elem);
+
+  return a_->va < b_->va;
+}
+
+unsigned page_hash (const struct hash_elem *e, void *aux)
+{	
+	const struct page *p = hash_entry(e,struct page, hash_elem);
+	return hash_bytes(&p->va, sizeof p->va);
+}
+
+void hash_free_func (const struct hash_elem *e, void *aux)
+{
+	struct page *p = hash_entry(e,struct page, hash_elem);
+	
+	destroy(p);
+	free(p);
+	free(e);
+}

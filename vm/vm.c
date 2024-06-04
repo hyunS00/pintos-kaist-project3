@@ -3,6 +3,7 @@
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
+#include "vaddr.h"
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -16,6 +17,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	list_init(&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -53,8 +55,27 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 		/* TODO: Create the page, fetch the initialier according to the VM type,
 		 * TODO: and then create "uninit" page struct by calling uninit_new. You
 		 * TODO: should modify the field after calling the uninit_new. */
-
+		struct page *new_page = (struct page*)malloc(sizeof(struct page));
+		if(new_page == NULL){
+			goto err;
+		}
+		switch (VM_TYPE(type)){
+			case VM_ANON:
+				uninit_new(new_page, upage, init, type, aux, anon_initializer);
+				break;
+			case VM_FILE:
+				uninit_new(new_page, upage, init, type, aux, file_backed_initializer);
+				break;
+			default:
+				goto err;
+		}
 		/* TODO: Insert the page into the spt. */
+
+		 if (!spt_insert_page(spt, new_page)) {
+            /* Failed to insert the page into spt. Free the allocated page. */
+            free(new_page);
+            goto err;
+        }
 	}
 err:
 	return false;
@@ -65,8 +86,12 @@ struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 	struct page *page = NULL;
 	/* TODO: Fill this function. */
+	struct hash_elem *e;
+	page->va = pg_round_down(va); // 하위비트를 페이지 단위로 내려 해당주소의 페이지 가상주소를 가져온다.
 
-	return page;
+	e = hash_find(&spt->spt_hash, &page->hash_elem);
+	
+	return e != NULL ? hash_entry(e, struct page, hash_elem) : NULL;
 }
 
 /* Insert PAGE into spt with validation. */
@@ -75,6 +100,8 @@ spt_insert_page (struct supplemental_page_table *spt UNUSED,
 		struct page *page UNUSED) {
 	int succ = false;
 	/* TODO: Fill this function. */
+	if(!hash_insert(&spt->spt_hash, &page->hash_elem))
+		succ = true;
 
 	return succ;
 }
@@ -115,6 +142,9 @@ vm_get_frame (void) {
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
+
+	list_push_front(&frame_table, &frame->frame_elem);
+	
 	return frame;
 }
 
@@ -174,6 +204,7 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	hash_init(&spt->spt_hash, page_hash ,page_less, NULL);
 }
 
 /* Copy supplemental page table from src to dst */
@@ -187,4 +218,5 @@ void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+	hash_destroy(&spt->spt_hash, hash_free_func);
 }

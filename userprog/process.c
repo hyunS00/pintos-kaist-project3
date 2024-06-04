@@ -214,6 +214,9 @@ process_exec (void *f_name) {
 	// char *file_name = f_name;
 	bool success;
 
+	struct thread *cur = thread_current();
+	supplemental_page_table_init(&cur->spt); // spt 해쉬테이블 초기화
+
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
@@ -295,6 +298,8 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+	uint32_t *pd = curr->pml4;
+
 	for (size_t i = 2; i < MAX_FDT; i++) {
 		if (curr->fdt[i] != NULL) 
 			file_close(curr->fdt[i]);
