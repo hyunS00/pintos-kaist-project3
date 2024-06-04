@@ -44,6 +44,8 @@ struct page {
 	const struct page_operations *operations;
 	void *va;              /* Address in terms of user space */
 	struct frame *frame;   /* Back reference for frame */
+	struct vm_entry *vme;
+	struct hash_elem hash_elem;
 
 	/* Your implementation */
 
@@ -61,9 +63,12 @@ struct page {
 
 /* The representation of "frame" */
 struct frame {
-	void *kva;
-	struct page *page;
+	void *kva;						// kernel virtual address
+	struct page *page;				// matching 될 page
+	struct list_elem frame_elem;	// frame table에 들어갈 elem
 };
+
+struct list frame_table;
 
 /* The function table for page operations.
  * This is one way of implementing "interface" in C.
@@ -85,11 +90,11 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
-	struct hash *spt;
+	struct hash *ht;
 };
 
 struct vm_entry {
-	enum vm_type;					// page 타입 
+	enum vm_type type;				// page 타입 
 	void *vaddr;					// 가상 주소
 	bool writable;					// write 가능 여부
 	bool is_loaded;					// 물리 메모리에 로드되었는지 여부
@@ -97,7 +102,7 @@ struct vm_entry {
 	off_t offset;					// 파일 내 offset (파일 타입인 경우)
 	size_t read_bytes;				// 읽어야 할 바이트 수 (파일 타입인 경우)
 	size_t zero_bytes;				// 0으로 채울 바이트 수 (파일 타입인 경우)
-	struct hash_elem hash_elem;		// Hash table Element
+	// struct hash_elem hash_elem;		// Hash table Element
 }
 
 #include "threads/thread.h"

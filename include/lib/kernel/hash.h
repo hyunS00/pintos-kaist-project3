@@ -99,5 +99,7 @@ uint64_t hash_string (const char *);
 uint64_t hash_int (int);
 
 bool vm_entry_less (const struct hash_elem *a_, const struct hash_elem *b_, void *aux UNUSED);
+unsigned vm_entry_hash (const struct hash_elem *p_, void *aux UNUSED);
+void hash_free_func (struct hash_elem *e, void *aux UNUSED);
 
 #endif /* lib/kernel/hash.h */

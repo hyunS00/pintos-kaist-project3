@@ -4,6 +4,9 @@
 #include "vm/vm.h"
 #include "vm/inspect.h"
 #include "include/lib/kernel/hash.h"
+#include "include/threads/mmu.h"
+#include "include/vm/uninit.h"
+
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -17,6 +20,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	list_init(&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -47,15 +51,35 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 
 	ASSERT (VM_TYPE(type) != VM_UNINIT)
 
-	struct supplemental_page_table *spt = &thread_current ()->spt;
+	struct supplemental_page_table *spt = &thread_current()->spt;
 
-	/* Check wheter the upage is already occupied or not. */
-	if (spt_find_page (spt, upage) == NULL) {
-		/* TODO: Create the page, fetch the initialier according to the VM type,
-		 * TODO: and then create "uninit" page struct by calling uninit_new. You
-		 * TODO: should modify the field after calling the uninit_new. */
+	/* Check whether the upage is already occupied or not. */
+	if (spt_find_page(spt, upage) == NULL) {
+		/* Create a new page with uninit_new(). */
+		struct page *new_page = (struct page *)malloc(sizeof(struct page));
+		if (new_page == NULL) {
+			goto err;
+		}
 
-		/* TODO: Insert the page into the spt. */
+		/* Set the operations according to the page type. */
+		switch (VM_TYPE(type)) {
+			case VM_ANON:
+				uninit_new(new_page, upage, init, type, aux, anon_initializer);
+				break;
+			case VM_FILE:
+				uninit_new(new_page, upage, init, type, aux, file_backed_initializer);
+				break;
+			default:
+				goto err;
+		}
+
+		/* Insert the page into the spt. */
+		if (!spt_insert_page(spt, new_page)) {
+			/* Failed to insert the page into spt. Free the allocated page. */
+			free(new_page);
+			goto err;
+		}
+		return true;
 	}
 err:
 	return false;
@@ -66,16 +90,22 @@ struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 	struct page *page = NULL;
 	/* TODO: Fill this function. */
+	struct hash_elem *e;
+	page->va = pg_round_down(va);
 
-	return page;
+	e = hash_find(&spt->ht, &page->hash_elem);
+
+	return e != NULL ? hash_entry(e, struct page, hash_elem) : NULL;
 }
 
 /* Insert PAGE into spt with validation. */
 bool
-spt_insert_page (struct supplemental_page_table *spt UNUSED,
-		struct page *page UNUSED) {
+spt_insert_page (struct supplemental_page_table *spt UNUSED, struct page *page UNUSED) {
 	int succ = false;
-	/* TODO: Fill this function. */
+	struct hash_elem *e = hash_insert(&spt->ht, &page->hash_elem);
+
+	if (e == NULL)
+		succ = true;
 
 	return succ;
 }
@@ -116,6 +146,8 @@ vm_get_frame (void) {
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
+
+	list_push_front(&frame_table, &frame->frame_elem);
 	return frame;
 }
 
@@ -175,7 +207,7 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
-	hash_init(spt, hash_int, vm_entry_less, NULL);
+	hash_init(spt->ht, vm_entry_hash, vm_entry_less, NULL);
 }
 
 /* Copy supplemental page table from src to dst */
@@ -189,4 +221,5 @@ void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
+	hash_destroy(&spt->ht, hash_free_func);
 }
