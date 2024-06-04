@@ -3,7 +3,7 @@
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
-#include "include/lib/kernel/hash.h"
+#include "kernel/hash.h"
 #include "include/threads/mmu.h"
 #include "include/vm/uninit.h"
 
@@ -60,6 +60,8 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 		if (new_page == NULL) {
 			goto err;
 		}
+
+		upage = pg_round_down(upage);
 
 		/* Set the operations according to the page type. */
 		switch (VM_TYPE(type)) {
@@ -141,12 +143,16 @@ vm_evict_frame (void) {
  * space.*/
 static struct frame *
 vm_get_frame (void) {
-	struct frame *frame = NULL;
+	struct frame *frame = (struct frame *) malloc(sizeof (struct frame));
 	/* TODO: Fill this function. */
+	frame->kva = palloc_get_page(PAL_USER);
 
 	ASSERT (frame != NULL);
 	ASSERT (frame->page == NULL);
 
+	if (frame->kva == NULL)
+		PANIC("todo");
+	
 	list_push_front(&frame_table, &frame->frame_elem);
 	return frame;
 }
@@ -161,7 +167,8 @@ static bool
 vm_handle_wp (struct page *page UNUSED) {
 }
 
-/* Return true on success */
+/* Return true on success */ 
+// 진짜로 page fault인지 아니면 lazy loading인지 확인한다
 bool
 vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
@@ -170,6 +177,25 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 
+	// 잘못된 사용자 포인터로 인한 폴트 처리
+	if (addr == NULL)
+		return false;
+
+	/* 유저스택 */
+	if (!user)
+		return false;
+
+	if(write && !page->writable)
+		return false;
+
+	addr = pg_round_down(addr);
+	page = spt_find_page(&spt->ht, addr);
+	if (page = NULL)
+		return false;
+	
+	if (page -> type!=0) { // page not initialize 타입이 아닐 때 
+		return false;
+	}
 	return vm_do_claim_page (page);
 }
 
@@ -182,24 +208,35 @@ vm_dealloc_page (struct page *page) {
 }
 
 /* Claim the page that allocate on VA. */
+// 
 bool
 vm_claim_page (void *va UNUSED) {
-	struct page *page = NULL;
+	va = pg_round_down(va);
+	
+	struct page *page = spt_find_page(&thread_current()->spt.ht, va);
 	/* TODO: Fill this function */
+	if (page == NULL)
+		return false;
 
 	return vm_do_claim_page (page);
 }
 
 /* Claim the PAGE and set up the mmu. */
+// page <-> frame mapping 이후 swap_in 호출
 static bool
 vm_do_claim_page (struct page *page) {
 	struct frame *frame = vm_get_frame ();
-
+	
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
+	struct thread *t = thread_current();
+	if (pml4_get_page (t->pml4, page->va != NULL))
+		return false;
+	
+	pml4_set_page (t->pml4, page->va, frame->kva, page->writable);
 
 	return swap_in (page, frame->kva);
 }
@@ -207,7 +244,7 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
-	hash_init(spt->ht, vm_entry_hash, vm_entry_less, NULL);
+	hash_init(spt->ht, page_hash, page_less, NULL);
 }
 
 /* Copy supplemental page table from src to dst */

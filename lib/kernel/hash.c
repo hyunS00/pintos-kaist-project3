@@ -411,7 +411,6 @@ page_hash (const struct hash_elem *p_, void *aux UNUSED) {
 void hash_free_func (struct hash_elem *e, void *aux UNUSED) {
 	struct page *page = hash_entry(e, struct page, hash_elem);
 	
-	free(page->vme);
 	destroy(page);
 	free(page);
 	free(e);
