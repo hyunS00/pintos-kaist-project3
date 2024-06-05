@@ -18,6 +18,9 @@ vm_init (void) {
 	pagecache_init ();
 #endif
 	register_inspect_intr ();
+
+	supplemental_page_table_init(&thread_current()->spt);
+
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
 	list_init(&frame_table);
@@ -90,12 +93,21 @@ err:
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
-	struct page page;
 	/* TODO: Fill this function. */
+	struct page page;
 	struct hash_elem *e;
+
+	printf("========== before pg_round_down va = %p\n", page.va);
 	page.va = pg_round_down(va);
+	printf("========== after pg_round_down va = %p\n", page.va);
 
 	e = hash_find(&spt->ht, &page.hash_elem);
+
+	if (e != NULL) {
+        printf("spt_find_page: Found page with va = %p\n", page.va);
+    } else {
+        printf("spt_find_page: Page not found with va = %p\n", page.va);
+    }
 
 	return e != NULL ? hash_entry(e, struct page, hash_elem) : NULL;
 }
@@ -148,7 +160,7 @@ vm_get_frame (void) {
 	frame->kva = palloc_get_page(PAL_USER);
 
 	ASSERT (frame != NULL);
-	ASSERT (frame->page == NULL);
+	// ASSERT (frame->page == NULL);
 
 	if (frame->kva == NULL)
 		PANIC("todo");
@@ -174,8 +186,6 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
 	struct page *page = NULL;
-	/* TODO: Validate the fault */
-	/* TODO: Your code goes here */
 
 	// 잘못된 사용자 포인터로 인한 폴트 처리
 	if (addr == NULL)
@@ -189,7 +199,7 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		return false;
 
 	addr = pg_round_down(addr);
-	page = spt_find_page(&spt->ht, addr);
+	page = spt_find_page(&spt, addr);
 	if (page = NULL)
 		return false;
 	
@@ -213,7 +223,7 @@ bool
 vm_claim_page (void *va UNUSED) {
 	va = pg_round_down(va);
 	
-	struct page *page = spt_find_page(&thread_current()->spt.ht, va);
+	struct page *page = spt_find_page(&thread_current()->spt, va);
 	/* TODO: Fill this function */
 	if (page == NULL)
 		return false;

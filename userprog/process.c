@@ -214,9 +214,9 @@ process_exec (void *f_name) {
 	// char *file_name = f_name;
 	bool success;
 
-	#ifdef VM
-	supplemental_page_table_init(&thread_current()->spt);
-	#endif
+	// #ifdef VM
+	// supplemental_page_table_init(&thread_current()->spt);
+	// #endif
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
 	 * it stores the execution information to the member. */
@@ -228,6 +228,9 @@ process_exec (void *f_name) {
 	/* We first kill the current context */
 	process_cleanup ();
 
+#ifdef VM
+	supplemental_page_table_init(&thread_current()->spt);
+#endif
 	/* And then load the binary */
 	success = load (f_name, &_if);
 
@@ -776,11 +779,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	ASSERT (pg_ofs (upage) == 0);
 	ASSERT (ofs % PGSIZE == 0);
 
+	upage = pg_round_down(upage);
 	while (read_bytes > 0 || zero_bytes > 0) {
 		/* Do calculate how to fill this page.
 		 * We will read PAGE_READ_BYTES bytes from FILE
 		 * and zero the final PAGE_ZERO_BYTES bytes. */
-		upage = pg_round_down(upage);
 		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
@@ -826,7 +829,7 @@ setup_stack (struct intr_frame *if_) {
 			if_->rsp = USER_STACK;
 		}
 		else {
-			struct page *page = spt_find_page(&thread_current()->spt.ht, stack_bottom);
+			struct page *page = spt_find_page(&thread_current()->spt, stack_bottom);
 			vm_dealloc_page(page);
 		}
 	}

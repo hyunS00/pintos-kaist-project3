@@ -280,6 +280,7 @@ hash_int (int i) {
 /* Returns the bucket in H that E belongs in. */
 static struct list *
 find_bucket (struct hash *h, struct hash_elem *e) {
+	print(" find_bucket in \n");
 	size_t bucket_idx = h->hash (e, h->aux) & (h->bucket_cnt - 1);
 	return &h->buckets[bucket_idx];
 }
@@ -289,12 +290,22 @@ find_bucket (struct hash *h, struct hash_elem *e) {
 static struct hash_elem *
 find_elem (struct hash *h, struct list *bucket, struct hash_elem *e) {
 	struct list_elem *i;
+	printf("========== find_elem in ==========\n");
+
+	if (list_empty(bucket)){
+		printf("========== find_elem : bucket is empty.\n");
+		return NULL;
+	}
 
 	for (i = list_begin (bucket); i != list_end (bucket); i = list_next (i)) {
 		struct hash_elem *hi = list_elem_to_hash_elem (i);
-		if (!h->less (hi, e, h->aux) && !h->less (e, hi, h->aux))
+		printf("========== find_elem: checking element %p in bucket ==========\n", (void*)hi);
+		if (!h->less (hi, e, h->aux) && !h->less (e, hi, h->aux)){
+			printf("========== find_elem: Found matching element in bucket.\n");
 			return hi;
+		}
 	}
+	printf("========== find_elem: No matching element found in bucket.\n");
 	return NULL;
 }
 
