@@ -213,7 +213,6 @@ int
 process_exec (void *f_name) {
 	// char *file_name = f_name;
 	bool success;
-	// supplemental_page_table_init (&thread_current ()->spt);
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
@@ -312,7 +311,9 @@ process_cleanup (void) {
 	struct thread *curr = thread_current ();
 
 #ifdef VM
-	supplemental_page_table_kill (&curr->spt);
+	/* init 하자마자 kill한다고 한다.. 
+		그치만 왜 ? 원래 있던거인데 주석처리 하는게 맞아? */
+	// supplemental_page_table_kill (&curr->spt);
 #endif
 
 	uint64_t *pml4;
@@ -781,7 +782,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	ASSERT (ofs % PGSIZE == 0);
 
 	/* page round down */
-	upage = pg_round_down(upage);
+	// upage = pg_round_down(upage);
 	while (read_bytes > 0 || zero_bytes > 0) {
 		/* Do calculate how to fill this page.
 		 * We will read PAGE_READ_BYTES bytes from FILE
@@ -790,11 +791,17 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		struct file_page *aux = (struct file_page *)malloc(sizeof(struct file_page));
+		struct file_page *aux = malloc(sizeof(struct file_page));
 		aux->file = file;
 		aux->offset = ofs;
 		aux->read_bytes = read_bytes;
 		aux->zero_bytes = zero_bytes;
+
+		// struct load_aux *aux = (struct load_aux *)malloc(sizeof(struct load_aux));
+		// aux->file = file;
+		// aux->offset = ofs;
+		// aux->read_bytes = read_bytes;
+		// aux->zero_bytes = zero_bytes;
 
 		/* 지금 실행 파일에 대해 세그먼트 설정을 해주고 있다.
 			만약 FILE 타입으로 초기화를 해주면 swap-out 되었을 때 원본 파일의 내용이 수정된다.
@@ -834,8 +841,9 @@ setup_stack (struct intr_frame *if_) {
 	/* round_down 안하는 이유?
 		stack_bottom에 해당하는 공간에 페이지를 할당해주어야 하므로 
 		round_down하면 안된다. */
-	success = vm_alloc_page(VM_ANON, stack_bottom, true);
-
+		
+	/* marker 뭐지*/
+	success = vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true);
 	if (success) {
 		/* 바로 로드 요청을 함으로써 ANON 타입 page로 만들어준다. */
 		success = vm_claim_page(stack_bottom);

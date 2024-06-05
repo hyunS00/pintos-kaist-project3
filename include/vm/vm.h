@@ -96,7 +96,7 @@ struct page_operations {
  * We don't want to force you to obey any specific design for this struct.
  * All designs up to you for this. */
 struct supplemental_page_table {
-	struct hash spt;
+	struct hash spt_hash;
 };
 
 #include "threads/thread.h"
@@ -122,7 +122,7 @@ bool vm_claim_page (void *va);
 enum vm_type page_get_type (struct page *page);
 
 /* functions added. */
-unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED);
+uint64_t page_hash (const struct hash_elem *p_, void *aux UNUSED);
 bool page_less (const struct hash_elem *a_,
            const struct hash_elem *b_, void *aux UNUSED);
 

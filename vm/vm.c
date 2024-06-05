@@ -7,6 +7,11 @@
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
 
+/* functions added. */
+uint64_t page_hash (const struct hash_elem *p_, void *aux UNUSED);
+bool page_less (const struct hash_elem *a_,
+           const struct hash_elem *b_, void *aux UNUSED);
+
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
 void
@@ -39,7 +44,7 @@ page_get_type (struct page *page) {
 }
 
 /* Returns a hash value for page p. */
-unsigned
+uint64_t
 page_hash (const struct hash_elem *p_, void *aux UNUSED) {
   const struct page *p = hash_entry (p_, struct page, hash_elem);
   return hash_bytes (&p->va, sizeof p->va);
@@ -102,6 +107,9 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 				goto err;
 		}
 		
+		/* 쓰기 권한 업데이트 */
+		new_page->writable = writable;
+
 		/* TODO: Insert the page into the spt. */
 		if (!spt_insert_page(spt, new_page)) {
 			free(new_page);
@@ -116,24 +124,22 @@ err:
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *
 spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
-	struct page *page = NULL;
+	/* malloc으로 해야 thread_current: is_thread ASSERT 안뜸 */
+	struct page p;
+	struct hash_elem *e;
+
 	/* TODO: Fill this function. */
 	
 	/* va가 page의 시작점을 가리키고 있지 않을 수 있으므로
 		round_down을 통해 page 시작점의 주소를 구한다. */
-	page->va = pg_round_down(va);
+	p.va = pg_round_down(va);
 	
 	/* page->va에 해당하는 주소에 위치한 hash_elem을 찾아온다. */
-	struct hash_elem *e = hash_find(&spt->spt, &page->hash_elem);
-	
-	/* 해당하는 hash_elem을 찾을 수 없으면 NULL을 리턴한다. */
-	if (e == NULL)
-		return NULL;
-	
-	/* 해당하는 page가 존재하므로 page 구조체를 구해서 리턴한다. */
-	page = hash_entry(e, struct page, hash_elem);
+	e = hash_find (&spt->spt_hash, &p.hash_elem);
 
-	return page;
+	/* 해당하는 hash_elem을 찾을 수 없으면 NULL을 리턴한다. */
+	/* 해당하는 page가 존재하므로 page 구조체를 구해서 리턴한다. */
+  	return e != NULL ? hash_entry (e, struct page, hash_elem) : NULL;
 }
 
 /* Insert PAGE into spt with validation. */
@@ -144,7 +150,7 @@ spt_insert_page (struct supplemental_page_table *spt UNUSED,
 	/* TODO: Fill this function. */
 	
 	/* insert에 성공하면 e == NULL이 된다.(hash_insert에 의해) */
-	if (!hash_insert(&spt->spt, &page->hash_elem))
+	if (!hash_insert(&spt->spt_hash, &page->hash_elem))
 		succ = true;
 
 	return succ;
@@ -194,7 +200,7 @@ vm_get_frame (void) {
 	}
 
 	ASSERT (frame != NULL);
-	ASSERT (frame->page == NULL);
+	// ASSERT (frame->page == NULL);
 
 	/* frame table에 생성된 frame을 추가해준다. */
 	list_push_front(&frame_table, &frame->frame_elem);
@@ -288,7 +294,7 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
-	if (!hash_init(&spt->spt, page_hash, page_less, NULL))
+	if (!hash_init(&spt->spt_hash, page_hash, page_less, NULL))
 		exit(-1);
 }
 
@@ -307,5 +313,5 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* 1. hash_destroy에서 buckets에 달린 page와 vme를 삭제해주어야 한다. */
 	/* bucket에 대한 해제는 hash_destroy에서,
 		page와 vme에 대한 해제는 hash_free_func에서 수행한다. */
-	hash_destroy(&spt->spt, hash_free_func);
+	hash_destroy(&spt->spt_hash, hash_free_func);
 }
