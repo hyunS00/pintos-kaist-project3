@@ -409,7 +409,7 @@ unsigned page_hash (const struct hash_elem *e, void *aux)
 
 void hash_free_func (const struct hash_elem *e, void *aux)
 {
-	struct page *p = hash_entry(e,struct page, hash_elem);
+	struct page *p = hash_entry(e, struct page, hash_elem);
 	
 	destroy(p);
 	free(p);

@@ -214,8 +214,6 @@ process_exec (void *f_name) {
 	// char *file_name = f_name;
 	bool success;
 
-	struct thread *cur = thread_current();
-	supplemental_page_table_init(&cur->spt); // spt 해쉬테이블 초기화
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
@@ -343,7 +341,6 @@ void
 process_activate (struct thread *next) {
 	/* Activate thread's page tables. */
 	pml4_activate (next->pml4);
-
 	/* Set thread's kernel stack for use in processing interrupts. */
 	tss_update (next);
 }
@@ -729,6 +726,27 @@ lazy_load_segment (struct page *page, void *aux) {
 	/* TODO: Load the segment from the file */
 	/* TODO: This called when the first page fault occurs on address VA. */
 	/* TODO: VA is available when calling this function. */
+	struct file_page *fp = (struct file_page *)aux;
+	struct file *file = fp->file;
+	off_t ofs = fp->offset;
+	uint32_t read_bytes = fp->read_bytes;
+	uint32_t zero_bytes = fp->zero_bytes;
+
+	file_seek(file, ofs);
+	size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+    size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+	uint8_t *kva = page->frame->kva;
+    if (kva == NULL)
+        return false;
+
+    if (file_read (file, kva, page_read_bytes) != (int) page_read_bytes)
+        return false;
+
+    memset (kva + page_read_bytes, 0, page_zero_bytes);
+	
+    free(aux);
+    return true;
 }
 
 /* Loads a segment starting at offset OFS in FILE at address
@@ -751,6 +769,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
 	ASSERT (pg_ofs (upage) == 0);
 	ASSERT (ofs % PGSIZE == 0);
+	upage = pg_round_down(upage);
 
 	while (read_bytes > 0 || zero_bytes > 0) {
 		/* Do calculate how to fill this page.
@@ -760,16 +779,29 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		void *aux = NULL;
-		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
-					writable, lazy_load_segment, aux))
-			return false;
+		struct file_page *aux = malloc(sizeof(struct file_page));
 
+		aux->file = file;
+		aux->offset = ofs;
+		aux->read_bytes = page_read_bytes;
+		aux->zero_bytes = page_zero_bytes;
+
+		if (!vm_alloc_page_with_initializer (VM_ANON, upage,
+					writable, lazy_load_segment, aux)){
+			// printf("===========false!!=========\n");
+			free(aux);
+			return false;
+		}
+		// printf("=========== page init done(%d) =========\n", ofs);
+		struct page * p = spt_find_page(&thread_current()->spt, upage);
+		// printf("\n <%d> \n", p->va);
 		/* Advance. */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
+		ofs += page_read_bytes;
 		upage += PGSIZE;
 	}
+	// printf("done++\n");
 	return true;
 }
 
@@ -784,6 +816,18 @@ setup_stack (struct intr_frame *if_) {
 	 * TODO: You should mark the page is stack. */
 	/* TODO: Your code goes here */
 
+	success = vm_alloc_page(VM_ANON, stack_bottom, true);
+	// printf("++++++++++++stack+++++++++++++\n");
+	if (success) {
+		success = vm_claim_page(stack_bottom);
+		if (success) {
+			if_->rsp = USER_STACK;
+		}
+		else {
+			struct page *page = spt_find_page(&thread_current()->spt, stack_bottom);
+			vm_dealloc_page(page);
+		}
+	}
 	return success;
 }
 #endif /* VM */

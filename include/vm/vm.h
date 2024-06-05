@@ -49,9 +49,9 @@ struct page {
 	/* Your implementation */
 	struct hash_elem hash_elem;
 
-	uint8_t type; // page 타입 (VM_BIN, VM_FILE, VM_ANON)
+	enum vm_type type; // page 타입 (VM_BIN, VM_FILE, VM_ANON)
 	bool writable; // write 가능 여부
-	bool is_loaded; // 물리 메모리에 로드되었는지 여부
+	//bool is_loaded; // 물리 메모리에 로드되었는지 여부
 	
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */
