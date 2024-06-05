@@ -419,7 +419,8 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* parsing file_name */
 	char *save_ptr;
-	char *argv = palloc_get_page(0);
+	// char *argv = palloc_get_page(0);
+	char *argv[100];
 	strlcpy(argv, file_name, PGSIZE);
 	
 	strtok_r(file_name, " ", &save_ptr);
@@ -434,7 +435,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	lock_acquire(&filesys_lock);
 	file = filesys_open (file_name);
 	if (file == NULL) {
-		palloc_free_page(argv);
+		// palloc_free_page(argv);
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
@@ -564,7 +565,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	file_deny_write(file);
 
 	success = true;
-	palloc_free_page(argv);
+	// palloc_free_page(argv);
 done:
 	/* We arrive here whether the load is successful or not. */
 	// file_close (file);
