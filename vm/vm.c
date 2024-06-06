@@ -250,13 +250,14 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	addr = pg_round_down(addr);
 	struct page *page = spt_find_page(spt, addr);
 
+	/* 해당 가상 주소에 대한 페이지가 메모리에 없는 상태*/
+	if (page == NULL)
+	{
+		exit(-1);
+	}
+
 	if (not_present)
 	{
-		/* 해당 가상 주소에 대한 페이지가 메모리에 없는 상태*/
-		if (page == NULL)
-		{
-			return vm_alloc_page_with_initializer(VM_ANON, addr, write, NULL, NULL);
-		}
 		/* 해당 가상 주소에 대한 페이지는 메모리에 존재하지만, r/o 페이지에 write 시도*/
 		return vm_do_claim_page(page);
 	}
