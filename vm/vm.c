@@ -104,6 +104,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 				break;
 			
 			default:
+				free(new_page);
 				goto err;
 		}
 		
@@ -146,7 +147,7 @@ spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 bool
 spt_insert_page (struct supplemental_page_table *spt UNUSED,
 		struct page *page UNUSED) {
-	int succ = false;
+	bool succ = false;
 	/* TODO: Fill this function. */
 	
 	/* insert에 성공하면 e == NULL이 된다.(hash_insert에 의해) */
@@ -221,28 +222,41 @@ vm_handle_wp (struct page *page UNUSED) {
 bool
 vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
-	
+
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
+	struct page *page = NULL;
+
+	/* 1. 유효한 페이지인지 확인한다. */
+	if (!user)
+		exit(-1);
 
 	/* spt에서 해당하는 page를 찾아온다. */
 	addr = pg_round_down(addr);
-	struct page *page = spt_find_page(spt, addr);
+	page = spt_find_page(spt, addr);
 
+	/* 2. not_present 
+	 * true : 해당 가상 주소에 대한 페이지가 메모리에 없는 상태
+	 * false : 해당 가상주소에 대한 페이지는 메모리에 존재하지만, r/o 페이지에  write 시도 */
+	if (not_present) {
+		if (page == NULL)
+			return vm_alloc_page_with_initializer(VM_ANON, addr, write, NULL, NULL);
+		else
+			return vm_do_claim_page(page);
+	}
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 
-	/* 1. 유효한 페이지인지 확인한다. */
-	if (!user || !page)
-		return false;
+	
 
-	/* 2. Bogus fault인지 확인한다. */
-	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
+	/* 3. Bogus fault인지 확인한다. */
+	/* 3-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
 			swap-out된 페이지에 대한 PF이다. */
-	if (page->type != VM_UNINIT) {
-		return false;
+	if (page->type != VM_UNINIT || page != NULL) {
+		if (vm_do_claim_page(page))
+			return true;
 	}
 
-	return vm_do_claim_page (page);
+	return false;
 }
 
 /* Free the page.
@@ -273,17 +287,23 @@ vm_claim_page (void *va UNUSED) {
 static bool
 vm_do_claim_page (struct page *page) {
 	struct frame *frame = vm_get_frame ();
-
+	if (frame == NULL)
+		return false;
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
 
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	struct thread *t = thread_current();
+	void *pml4 = t->pml4;
 	
 	/* 이미 page - frame이 매핑되어 있으면 다시 매핑해줄 필요가 없다. */
-	if (pml4_get_page(t->pml4, page->va) != NULL)
-		return false;
+	if (pml4_get_page(t->pml4, page->va) == NULL)
+		/* 매핑 시켜 주고 */
+		if (!pml4_set_page(pml4, page->va, frame->kva, page->writable)){
+			free(frame);
+			return false;
+		}
 
 	/* page - frame 매핑 */
 	pml4_set_page(t->pml4, page->va, frame->kva, page->writable);
@@ -302,6 +322,33 @@ supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
 bool
 supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 		struct supplemental_page_table *src UNUSED) {
+
+	struct hash_iterator i;
+    hash_first(&i, &src->spt_hash);
+    while (hash_next(&i))
+    {
+        struct page *src_page = hash_entry(hash_cur(&i), struct page, hash_elem);
+        enum vm_type type = src_page->operations->type;
+        void *upage = src_page->va;
+        bool writable = src_page->writable;
+        if (type == VM_UNINIT)
+        {
+            vm_initializer *init = src_page->uninit.init;
+            void *aux = src_page->uninit.aux;
+            if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
+                return false;
+        }
+        else
+        {
+            if (!vm_alloc_page(type, upage, writable))
+                return false;
+            if (!vm_claim_page(upage))
+                return false;
+            struct page *dst_page = spt_find_page(dst, upage);
+            memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+        }
+    }
+    return true;
 }
 
 /* Free the resource hold by the supplemental page table */
@@ -313,5 +360,5 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* 1. hash_destroy에서 buckets에 달린 page와 vme를 삭제해주어야 한다. */
 	/* bucket에 대한 해제는 hash_destroy에서,
 		page와 vme에 대한 해제는 hash_free_func에서 수행한다. */
-	hash_destroy(&spt->spt_hash, hash_free_func);
+	//hash_destroy(&spt->spt_hash, hash_free_func);
 }
