@@ -30,6 +30,8 @@
         "string.h": "c",
         "directory.h": "c",
         "stdlib.h": "c",
-        "intr-stubs.h": "c"
+        "intr-stubs.h": "c",
+        "uninit.h": "c",
+        "anon.h": "c"
     }
 }
