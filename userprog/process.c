@@ -164,7 +164,7 @@ __do_fork (void *aux) {
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
 
 	/* 2. Duplicate PT */
-	current->pml4 = pml4_create();
+	
 	if (current->pml4 == NULL)
 		goto error;
 
@@ -313,7 +313,7 @@ process_cleanup (void) {
 #ifdef VM
 	/* init 하자마자 kill한다고 한다.. 
 		그치만 왜 ? 원래 있던거인데 주석처리 하는게 맞아? */
-	// supplemental_page_table_kill (&curr->spt);
+	supplemental_page_table_kill (&curr->spt);
 #endif
 
 	uint64_t *pml4;
@@ -419,7 +419,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* parsing file_name */
 	char *save_ptr;
-	char *argv = palloc_get_page(0);
+	char *argv[100];
 	strlcpy(argv, file_name, PGSIZE);
 	
 	strtok_r(file_name, " ", &save_ptr);
@@ -434,7 +434,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	lock_acquire(&filesys_lock);
 	file = filesys_open (file_name);
 	if (file == NULL) {
-		palloc_free_page(argv);
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
@@ -564,7 +563,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	file_deny_write(file);
 
 	success = true;
-	palloc_free_page(argv);
 done:
 	/* We arrive here whether the load is successful or not. */
 	// file_close (file);
@@ -791,7 +789,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
-		struct file_page *aux = malloc(sizeof(struct file_page));
+		struct file_page *aux = (struct file_page *)malloc(sizeof(struct file_page));
+		if (aux == NULL)
+			return false;
 		aux->file = file;
 		aux->offset = ofs;
 		aux->read_bytes = read_bytes;
