@@ -104,6 +104,7 @@ vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 				break;
 			
 			default:
+				free(new_page);
 				goto err;
 		}
 		
@@ -146,7 +147,7 @@ spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
 bool
 spt_insert_page (struct supplemental_page_table *spt UNUSED,
 		struct page *page UNUSED) {
-	int succ = false;
+	bool succ = false;
 	/* TODO: Fill this function. */
 	
 	/* insert에 성공하면 e == NULL이 된다.(hash_insert에 의해) */
@@ -190,6 +191,9 @@ static struct frame *
 vm_get_frame (void) {
 	/* TODO: Fill this function. */
 	struct frame *frame = (struct frame *) malloc(sizeof(struct frame));
+	if (frame == NULL)
+		return NULL;
+
 	frame->kva = palloc_get_page(PAL_USER);
 
 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
@@ -199,7 +203,7 @@ vm_get_frame (void) {
 		PANIC("todo");
 	}
 
-	ASSERT (frame != NULL);
+	// ASSERT (frame != NULL);
 	// ASSERT (frame->page == NULL);
 
 	/* frame table에 생성된 frame을 추가해준다. */
@@ -223,26 +227,35 @@ vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
 		bool user UNUSED, bool write UNUSED, bool not_present UNUSED) {
 	
 	struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
+	struct page *page = NULL;
+
+	/* 1. 유효한 페이지인지 확인한다. */
+	if (!user)
+		exit(-1);
 
 	/* spt에서 해당하는 page를 찾아온다. */
 	addr = pg_round_down(addr);
-	struct page *page = spt_find_page(spt, addr);
+	page = spt_find_page(spt, addr);
 
-	/* TODO: Validate the fault */
-	/* TODO: Your code goes here */
-
-	/* 1. 유효한 페이지인지 확인한다. */
-	if (!user || !page)
-		return false;
-
-	/* 2. Bogus fault인지 확인한다. */
-	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
-			swap-out된 페이지에 대한 PF이다. */
-	if (page->type != VM_UNINIT) {
-		return false;
+	/* 2. not_present - true: 해당 가상 주소에 대한 페이지가 메모리에 없는 상태 
+						false: 해당 가상 주소에 대한 페이지는 메모리에 존재하지만,
+								r/o 페이지에 write 시도 */
+	if (not_present) {
+		if (page == NULL)
+			return vm_alloc_page_with_initializer(VM_ANON, addr, write, NULL, NULL);
+		else
+			return vm_do_claim_page(page);
 	}
 
-	return vm_do_claim_page (page);
+	/* 3. Bogus fault인지 확인한다. */
+	/* 3-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
+			swap-out된 페이지에 대한 PF이다. */
+	if (page->type != VM_UNINIT || page != NULL) {
+		if (vm_do_claim_page(page))
+			return true;
+	}
+
+	return false;
 }
 
 /* Free the page.
@@ -274,6 +287,9 @@ static bool
 vm_do_claim_page (struct page *page) {
 	struct frame *frame = vm_get_frame ();
 
+	if (frame == NULL)
+		return false;
+
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
@@ -281,12 +297,14 @@ vm_do_claim_page (struct page *page) {
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	struct thread *t = thread_current();
 	
-	/* 이미 page - frame이 매핑되어 있으면 다시 매핑해줄 필요가 없다. */
-	if (pml4_get_page(t->pml4, page->va) != NULL)
-		return false;
-
-	/* page - frame 매핑 */
-	pml4_set_page(t->pml4, page->va, frame->kva, page->writable);
+	/* page - frame이 매핑되어 있지 않다면 */
+	if (pml4_get_page(t->pml4, page->va) == NULL) {
+		/* 매핑을 시킨다. */
+		if (!pml4_set_page(t->pml4, page->va, frame->kva, page->writable)) {
+			free(frame);
+			return false;
+		}
+	}
 
 	return swap_in (page, frame->kva);
 }
@@ -294,6 +312,7 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	/* 여기서 할당도 같이 해주고 있음 */
 	if (!hash_init(&spt->spt_hash, page_hash, page_less, NULL))
 		exit(-1);
 }
@@ -302,6 +321,69 @@ supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
 bool
 supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 		struct supplemental_page_table *src UNUSED) {
+	
+	// struct hash_iterator i;
+	// struct hash *h = &src->spt_hash;
+	// hash_first(&i, h);
+	
+	// while (hash_next(&i)) {
+	// 	struct page *page = hash_entry(hash_cur(&i), struct page, hash_elem);
+
+	// 	struct page *new_page = (struct page *)malloc(sizeof(struct page));
+		
+	// 	new_page->operations = page->operations;
+	// 	new_page->va = page->va;
+	// 	new_page->frame = page->frame;
+	// 	new_page->hash_elem = page->hash_elem;
+	// 	new_page->type = page->type;
+	// 	new_page->writable = page->writable;
+
+	// 	switch (page->type) {
+	// 		case VM_ANON:
+	// 			break;
+	// 		case VM_FILE:
+	// 			{
+	// 			struct file_page *fp = &page->file;
+	// 			new_page->file = page->file;
+	// 			break;
+	// 			}
+	// 		default:
+	// 			break;
+	// 	}
+
+	// 	bool success = vm_claim_page(new_page);
+	// 	if (!success)
+	// 		return false;
+	// }
+
+	// return true;
+
+	// struct hash_iterator i;
+	// hash_first(&i, &src->spt_hash);
+	// while (hash_next(&i))
+	// {
+	// 	struct page *src_page = hash_entry(hash_cur(&i), struct page, hash_elem);
+	// 	enum vm_type type = src_page->operations->type;
+	// 	void *upage = src_page->va;
+	// 	bool writable = src_page->writable;
+	// 	if (type == VM_UNINIT)
+	// 	{
+	// 		vm_initializer *init = src_page->uninit.init;
+	// 		void *aux = src_page->uninit.aux;
+	// 		if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
+	// 			return false;
+	// 	}
+	// 	else
+	// 	{
+	// 		if (!vm_alloc_page(type, upage, writable))
+	// 			return false;
+	// 		if (!vm_claim_page(upage))
+	// 			return false;
+	// 		struct page *dst_page = spt_find_page(dst, upage);
+	// 		memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+	// 	}
+	// }
+	// return true;
 }
 
 /* Free the resource hold by the supplemental page table */

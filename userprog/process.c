@@ -793,16 +793,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
 		struct file_page *aux = malloc(sizeof(struct file_page));
+		if (aux == NULL)
+			return false;
 		aux->file = file;
 		aux->offset = ofs;
 		aux->read_bytes = read_bytes;
 		aux->zero_bytes = zero_bytes;
-
-		// struct load_aux *aux = (struct load_aux *)malloc(sizeof(struct load_aux));
-		// aux->file = file;
-		// aux->offset = ofs;
-		// aux->read_bytes = read_bytes;
-		// aux->zero_bytes = zero_bytes;
 
 		/* 지금 실행 파일에 대해 세그먼트 설정을 해주고 있다.
 			만약 FILE 타입으로 초기화를 해주면 swap-out 되었을 때 원본 파일의 내용이 수정된다.
