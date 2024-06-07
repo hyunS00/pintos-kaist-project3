@@ -6,7 +6,7 @@
 #include "kernel/hash.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
-
+#include <string.h>
 /* functions added. */
 uint64_t page_hash(const struct hash_elem *p_, void *aux UNUSED);
 bool page_less(const struct hash_elem *a_,
@@ -242,22 +242,16 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* TODO: Your code goes here */
 
 	/* 1. 사용자인지 확인한다. */
-	if (!user)
+	if(is_kernel_vaddr(addr))
 		exit(-1);
 	/* spt에서 해당하는 page를 찾아온다. */
 	addr = pg_round_down(addr);
 	struct page *page = spt_find_page(spt, addr);
-
+	if (page == NULL)
+		exit(-1);
+	
 	if (not_present)
-	{
-		/* 해당 가상 주소에 대한 페이지가 메모리에 없는 상태*/
-		if (page == NULL)
-		{
-			return vm_alloc_page_with_initializer(VM_ANON, addr, write, NULL, NULL);
-		}
-		/* 해당 가상 주소에 대한 페이지는 메모리에 존재하지만, r/o 페이지에 write 시도*/
 		return vm_do_claim_page(page);
-	}
 
 	/* 2. Bogus fault인지 확인한다. */
 	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
@@ -338,42 +332,101 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED)
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 								  struct supplemental_page_table *src UNUSED)
 {
-	struct hash_iterator i;
-	hash_first(&i, &src->spt_hash);
-	while (hash_next(&i))
-	{
-		struct page *src_page = hash_entry(hash_cur(&i), struct page, hash_elem);
-		enum vm_type type = src_page->operations->type;
-		void *upage = src_page->va;
-		bool writable = src_page->writable;
-		if (type == VM_UNINIT)
-		{
-			vm_initializer *init = src_page->uninit.init;
-			void *aux = src_page->uninit.aux;
-			if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
+	struct hash_iterator iterator;
+	hash_first(&iterator, &src->spt_hash);
+
+	while (hash_next(&iterator)) {
+		/*
+			hash_cur: 현재 elem을 리턴하거나, table의 끝인 null 포인터를 반환하거나
+			즉 현재 해시 테이블의 elem을 리턴함
+		*/
+		struct page *parent_page = hash_entry(hash_cur(&iterator), struct page, hash_elem);
+
+		enum vm_type type = page_get_type(parent_page);
+		void *upage = parent_page->va;
+		bool writable = parent_page->writable;
+
+		vm_initializer *init = parent_page->uninit.init;
+		void *aux = parent_page->uninit.aux;
+
+		// 부모의 페이지 타입이 uninit인 경우
+		if (parent_page->operations->type == VM_UNINIT) {
+			if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux)) {
 				return false;
+			}
+
+		// 부모의 페이지 타입이 uninit이 아니면 spt 추가만
+		} else {
+			if (!vm_alloc_page(type, upage, writable) || !vm_claim_page(upage)) {
+				return false;
+			}
 		}
-		else
-		{
-			if (!vm_alloc_page(type, upage, writable))
-				return false;
-			if (!vm_claim_page(upage))
-				return false;
-			struct page *dst_page = spt_find_page(dst, upage);
-			memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+
+		if (parent_page->operations->type != VM_UNINIT) {
+			struct page* child_page = spt_find_page(dst, upage);
+			memcpy(child_page->frame->kva, parent_page->frame->kva, PGSIZE);
 		}
 	}
+
 	return true;
 }
+	// struct hash_iterator i;
+	// hash_first(&i, &src->spt_hash);
+	// while (hash_next(&i))
+	// {
+	// 	struct page *src_page = hash_entry(hash_cur(&i), struct page, hash_elem);
+	// 	enum vm_type type = page_get_type(src_page);
+	// 	void *upage = src_page->va;
+	// 	bool writalbe = src_page->writable;
+
+	// 	switch (VM_TYPE(type))
+	// 	{
+	// 		case VM_UNINIT:
+	// 			if (!vm_alloc_page_with_initializer(type, upage, writalbe, src_page->uninit.init, src_page->uninit.aux))
+	// 				return false;
+	// 			continue;
+
+	// 		case VM_ANON:
+	// 			{
+	// 				struct anon_page *anon_aux = malloc(sizeof(struct anon_page));
+	// 				if (anon_aux == NULL)
+    //                 	return false;
+
+	// 				memcpy(anon_aux, &src_page->anon, sizeof(struct anon_page));
+
+	// 				if (!vm_alloc_page_with_initializer(type, upage, writalbe, NULL, NULL)){
+	// 					free(anon_aux);
+	// 					return false;
+	// 				}
+	// 				if(!vm_claim_page(upage)){
+	// 					free(anon_aux);
+	// 					return false;
+	// 				}
+	// 				struct page *dst_page = spt_find_page(dst, upage);
+	// 				if (dst_page = NULL)
+	// 				{
+	// 					free(anon_aux);
+	// 					return false;
+	// 				}
+	// 				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+	// 				continue;
+	// 			}
+
+	// 		default:
+	// 			return false;
+
+	// 		break;
+	// 	}
+		
+	// }
+
+	// return true;
+// }
 
 /* Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED)
 {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and -> 이거까지는 구현 완
 	 * TODO: writeback all the modified contents to the storage. -> 나중에 구현해야함 */
-
-	/* 1. hash_destroy에서 buckets에 달린 page와 vme를 삭제해주어야 한다. */
-	/* bucket에 대한 해제는 hash_destroy에서,
-		page와 vme에 대한 해제는 hash_free_func에서 수행한다. */
-	hash_destroy(&spt->spt_hash, hash_free_func);
+	hash_clear(&spt->spt_hash, hash_free_func);
 }
