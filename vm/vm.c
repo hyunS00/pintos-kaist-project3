@@ -6,7 +6,7 @@
 #include "kernel/hash.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
-#include "include/lib/string.h"
+#include "lib/string.h"
 
 /* functions added. */
 uint64_t page_hash(const struct hash_elem *p_, void *aux UNUSED);
@@ -241,6 +241,10 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
+	// printf("addr: %d user: %d write: %d not_present: %d\n",addr, user, write, not_present);
+	/* 1. 커널 주소에대한 접근인지 확인한다 */
+	if(is_kernel_vaddr(addr))
+		exit(-1);
 
 	/* 1. 사용자인지 확인한다. */
 	if (is_kernel_vaddr(addr)){
@@ -249,14 +253,11 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* spt에서 해당하는 page를 찾아온다. */
 	addr = pg_round_down(addr);
 	struct page *page = spt_find_page(spt, addr);
-
 	/* 해당 가상 주소에 대한 페이지가 메모리에 없는 상태*/
 	if (page == NULL)
-	{
 		exit(-1);
-	}
 
-	if (write && !page->writable)
+	if(write && !page->writable)
 		exit(-1);
 
 	if (not_present)
@@ -268,12 +269,12 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* 2. Bogus fault인지 확인한다. */
 	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
 			swap-out된 페이지에 대한 PF이다. */
-	if (page->operations->type != VM_UNINIT || page != NULL)
+	if (page->type != VM_UNINIT || page != NULL)
 	{
 		if (vm_do_claim_page(page))
 			return true;
 	}
-
+	printf("handle fault\n");
 	return false;
 }
 
@@ -317,7 +318,6 @@ vm_do_claim_page(struct page *page)
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	struct thread *t = thread_current();
 	void *pml4 = t->pml4;
-
 	/* page - frame이 매핑되어 있지 않다면 */
 	if (pml4_get_page(pml4, page->va) == NULL)
 	{
@@ -340,6 +340,13 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED)
 		exit(-1);
 }
 
+/*
+	supplemental_page_table_copy: src에서 dst로 SPT을 복사하는 함수
+	
+	자식이 부모의 실행 context를 상속해야 할 때 사용됨 ex) fork()
+	src의 SPT에 있는 각 페이지를 반복하여 dst의 SPT에 있는 엔트리의 복사본을 만듦
+	uninit 페이지를 할당하고 즉시 claim해야 함
+*/
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 								  struct supplemental_page_table *src UNUSED)
 {
@@ -360,18 +367,11 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			/* 부모 페이지의 필드들을 갖고와 같은 설정으로 자식 페이지를 할당한다. */
 			/* 사실상 UNINIT 페이지는 존재하지 않는다? */
 			case VM_UNINIT:
-			{
-				if (aux != NULL){
-					struct file_page *new_aux = (struct file_page *) malloc(sizeof(struct file_page));
-					memcpy(new_aux, aux, sizeof(struct file_page));
-					aux = new_aux;
-				}
-
 				if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
 					return false;
-			
+				
 				break;
-			}
+			
 			/* UNINIT 상태가 아니라면 물리 프레임에 매핑하는 작업까지 수행한다. */
 			/* aux가 필요하지 않은 이유?
 				- aux는 lazy loading을 위해 */
@@ -401,7 +401,6 @@ void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED)
 {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and -> 이거까지는 구현 완
 	 * TODO: writeback all the modified contents to the storage. -> 나중에 구현해야함 */
-
 	/* 1. hash_destroy에서 buckets에 달린 page와 vme를 삭제해주어야 한다. */
 	/* bucket에 대한 해제는 hash_destroy에서,
 		page와 vme에 대한 해제는 hash_free_func에서 수행한다. */

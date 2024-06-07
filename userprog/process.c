@@ -775,15 +775,12 @@ lazy_load_segment(struct page *page, void *aux)
 	uint8_t *kva = page->frame->kva;
 	if (kva == NULL)
 		return false;
-
+	
 	/* 읽기 실패 */
 	if (file_read(file, kva, page_read_bytes) != (int)page_read_bytes)
 		return false;
 
 	memset(kva + page_read_bytes, 0, page_zero_bytes);
-
-	/* 더이상 aux는 쓰이지 않는다. */
-	free(aux);
 
 	return true;
 }
