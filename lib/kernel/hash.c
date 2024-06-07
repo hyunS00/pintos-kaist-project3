@@ -403,5 +403,8 @@ hash_free_func (struct hash_elem *e, void *aux) {
 	/* page type에 맞는 destroy function을 부른다. */
 	destroy(p);
 	free(p);
-	free(e);
+
+	/* e 프리하면 안됨 */
+	/* elem 자체가 리스트 내에서 유기적으로 연결되어 있으니까 */
+	// free(e);
 }
