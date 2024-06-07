@@ -98,19 +98,18 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
 		upage = pg_round_down(upage);
 
 		/* type에 맞게 uninit page를 생성한다. */
-		switch (VM_TYPE(type))
-		{
-		case VM_ANON:
-			uninit_new(new_page, upage, init, type, aux, anon_initializer);
-			break;
-
-		case VM_FILE:
-			uninit_new(new_page, upage, init, type, aux, file_backed_initializer);
-			break;
-
-		default:
-			free(new_page);
-			goto err;
+		switch (VM_TYPE(type)) {
+			case VM_ANON:
+				uninit_new(new_page, upage, init, type, aux, anon_initializer);
+				break;
+			
+			case VM_FILE:
+				uninit_new(new_page, upage, init, type, aux, file_backed_initializer);
+				break;
+			
+			default:
+				free(new_page);
+				goto err;
 		}
 
 		/* 쓰기 권한 업데이트 */
@@ -302,6 +301,9 @@ vm_do_claim_page(struct page *page)
 	if (frame == NULL)
 		return false;
 
+	if (frame == NULL)
+		return false;
+
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
@@ -326,8 +328,9 @@ vm_do_claim_page(struct page *page)
 }
 
 /* Initialize new supplemental page table */
-void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED)
-{
+void
+supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	/* 여기서 할당도 같이 해주고 있음 */
 	if (!hash_init(&spt->spt_hash, page_hash, page_less, NULL))
 		exit(-1);
 }
