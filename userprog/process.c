@@ -323,9 +323,8 @@ process_cleanup(void)
 	struct thread *curr = thread_current();
 
 #ifdef VM
-	/* init 하자마자 kill한다고 한다..
-		그치만 왜 ? 원래 있던거인데 주석처리 하는게 맞아? */
-	// supplemental_page_table_kill (&curr->spt);
+	supplemental_page_table_kill(&curr->spt);
+
 #endif
 
 	uint64_t *pml4;
@@ -783,7 +782,7 @@ lazy_load_segment(struct page *page, void *aux)
 	memset(kva + page_read_bytes, 0, page_zero_bytes);
 
 	/* 더이상 aux는 쓰이지 않는다. */
-	free(aux);
+	// free(aux);
 
 	return true;
 }

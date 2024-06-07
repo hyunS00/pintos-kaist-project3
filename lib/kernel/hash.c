@@ -175,7 +175,7 @@ hash_apply (struct hash *h, hash_action_func *action) {
    hash_first (&i, h);
    while (hash_next (&i))
    {
-   struct foo *f = hash_entry (hash_cur (&i), struct foo, elem);
+   struct foo *f = hash_entry (hash_cur (&i), struct foo, elem);4
    ...do something with f...
    }
 
@@ -403,5 +403,5 @@ hash_free_func (struct hash_elem *e, void *aux) {
 	/* page type에 맞는 destroy function을 부른다. */
 	destroy(p);
 	free(p);
-	free(e);
+	// free(e);
 }
