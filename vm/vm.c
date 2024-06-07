@@ -224,6 +224,26 @@ vm_get_frame(void)
 static void
 vm_stack_growth(void *addr UNUSED)
 {
+	void *stack_bottom = pg_round_down(addr);
+
+
+	/* TODO: Map the stack on stack_bottom and claim the page immediately.
+	 * TODO: If success, set the rsp accordingly.
+	 * TODO: You should mark the page is stack. */
+	/* TODO: Your code goes here */
+
+	/* setup_stack (from userprog) */
+	/* stack_bottom에 해당하는 공간에 페이지를 할당한다.
+		일단은 uninit으로. */
+	/* round_down 안하는 이유?
+		stack_bottom에 해당하는 공간에 페이지를 할당해주어야 하므로
+		round_down하면 안된다. */
+
+	/* marker 뭐지*/
+	if(vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true) && !vm_claim_page(stack_bottom)){
+		struct page *page = spt_find_page(&thread_current()->spt, stack_bottom);
+		vm_dealloc_page(page);
+	}
 }
 
 /* Handle the fault on write_protected page */
@@ -239,26 +259,39 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 
 	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
 
+	uintptr_t rsp ;
+
+	if(user)
+		rsp = f->rsp;
+	else
+		rsp = thread_current()->user_rsp;
+
+
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	// printf("addr: %d user: %d write: %d not_present: %d\n",addr, user, write, not_present);
 	/* 1. 커널 주소에대한 접근인지 확인한다 */
-	if(is_kernel_vaddr(addr))
+	if (is_kernel_vaddr(addr))
 		exit(-1);
 
-	/* 1. 사용자인지 확인한다. */
-	if (is_kernel_vaddr(addr)){
-		exit(-1);
+	/* 스택 성장 가능한지 체크 */
+	if (USER_STACK - (1 << 20) <= (rsp - 8) && (rsp - 8) <= addr && addr <= USER_STACK) {
+		vm_stack_growth(addr);
+		return true;
 	}
+
 	/* spt에서 해당하는 page를 찾아온다. */
 	addr = pg_round_down(addr);
 	struct page *page = spt_find_page(spt, addr);
 	/* 해당 가상 주소에 대한 페이지가 메모리에 없는 상태*/
-	if (page == NULL)
+	if (page == NULL){
+		// printf("여기서 죽었음4\n");
 		exit(-1);
+	}
 
-	if(write && !page->writable)
+	if(write && !page->writable) {
+		// printf("여기서 죽었음5\n");
 		exit(-1);
+	}
 
 	if (not_present)
 	{
@@ -269,7 +302,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* 2. Bogus fault인지 확인한다. */
 	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
 			swap-out된 페이지에 대한 PF이다. */
-	if (page->type != VM_UNINIT || page != NULL)
+	if (page->operations->type != VM_UNINIT || page != NULL)
 	{
 		if (vm_do_claim_page(page))
 			return true;
@@ -367,6 +400,13 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			/* 부모 페이지의 필드들을 갖고와 같은 설정으로 자식 페이지를 할당한다. */
 			/* 사실상 UNINIT 페이지는 존재하지 않는다? */
 			case VM_UNINIT:
+
+				if(aux != NULL) {
+						struct file_page *new_aux = (struct file_page *) malloc(sizeof(struct file_page));
+						memcpy(new_aux, aux, sizeof(struct file_page));
+						aux = new_aux;
+					}
+
 				if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
 					return false;
 				

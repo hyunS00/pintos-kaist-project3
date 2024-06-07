@@ -65,6 +65,8 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	uint64_t arg5 = f->R.r8;
 	uint64_t arg6 = f->R.r9;
 
+	thread_current()->user_rsp = f->rsp;
+
 	// check validity
 	switch (f->R.rax)
 	{
@@ -322,3 +324,13 @@ int exec(const char *file)
 	sema_down(&thread_current()->sema_load);
 	return process_exec(temp);
 }
+
+// void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
+// 	1. fd로 열린 파일의 offset 바이트부터 length 바이트를 addr에 매핑
+// 	2. 1)로 인해 addr에는 전체 파일이 매핑될 것
+// 	3. 
+// }
+
+// void munmap (void *addr) {
+
+// }
