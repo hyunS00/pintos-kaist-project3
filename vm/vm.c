@@ -360,11 +360,18 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			/* 부모 페이지의 필드들을 갖고와 같은 설정으로 자식 페이지를 할당한다. */
 			/* 사실상 UNINIT 페이지는 존재하지 않는다? */
 			case VM_UNINIT:
+			{
+				if (aux != NULL){
+					struct file_page *new_aux = (struct file_page *) malloc(sizeof(struct file_page));
+					memcpy(new_aux, aux, sizeof(struct file_page));
+					aux = new_aux;
+				}
+
 				if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
 					return false;
-				
-				break;
 			
+				break;
+			}
 			/* UNINIT 상태가 아니라면 물리 프레임에 매핑하는 작업까지 수행한다. */
 			/* aux가 필요하지 않은 이유?
 				- aux는 lazy loading을 위해 */
