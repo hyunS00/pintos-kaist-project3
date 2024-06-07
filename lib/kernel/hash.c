@@ -403,5 +403,4 @@ hash_free_func (struct hash_elem *e, void *aux) {
 	/* page type에 맞는 destroy function을 부른다. */
 	destroy(p);
 	free(p);
-	free(e);
 }
