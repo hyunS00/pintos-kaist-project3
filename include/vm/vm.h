@@ -50,7 +50,6 @@ struct page {
 	struct hash_elem hash_elem;
 
 	/* 공통 필드 */
-	enum vm_type type;
 	bool writable;
 
 	/* Per-type data are binded into the union.

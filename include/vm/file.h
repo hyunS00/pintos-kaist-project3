@@ -6,16 +6,19 @@
 struct page;
 enum vm_type;
 
-struct file_page {
+struct file_page
+{
 	struct file *file;
 	size_t offset;
 	size_t read_bytes;
 	size_t zero_bytes;
 };
 
-void vm_file_init (void);
-bool file_backed_initializer (struct page *page, enum vm_type type, void *kva);
+void vm_file_init(void);
+bool file_backed_initializer(struct page *page, enum vm_type type, void *kva);
+void *mmap(void *addr, size_t length, int writable, int fd, off_t offset);
+void munmap(void *addr);
 void *do_mmap(void *addr, size_t length, int writable,
-		struct file *file, off_t offset);
-void do_munmap (void *va);
+			  struct file *file, off_t offset);
+void do_munmap(void *va);
 #endif
