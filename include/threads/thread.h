@@ -139,6 +139,9 @@ struct thread {
 	/* Table for whole virtual memory owned by thread. */
 	struct supplemental_page_table spt;
 #endif
+	/* 커널에서 PF가 나는 경우 rsp를 알 수 없으므로 
+		이 필드를 통해 유저가 시스템 콜을 호출할 때 당시의 rsp를 저장한다. */
+	uintptr_t user_rsp;
 
 	/* Owned by thread.c. */
 	struct intr_frame tf;               /* Information for switching */

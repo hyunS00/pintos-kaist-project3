@@ -50,8 +50,11 @@ struct page {
 	struct hash_elem hash_elem;
 
 	/* 공통 필드 */
-	enum vm_type type;
+	// enum vm_type type;
 	bool writable;
+	/* 한 파일에 대해 여러 페이지가 매핑될 때
+		몇 개만큼 매핑되었는지 확인하기 위한 필드 */
+	int pg_cnt;
 
 	/* Per-type data are binded into the union.
 	 * Each function automatically detects the current union */

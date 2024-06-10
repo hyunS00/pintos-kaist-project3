@@ -2,6 +2,8 @@
 
 #include "vm/vm.h"
 #include "devices/disk.h"
+#include "threads/palloc.h"
+#include "threads/mmu.h"
 
 /* DO NOT MODIFY BELOW LINE */
 static struct disk *swap_disk;
@@ -49,4 +51,21 @@ anon_swap_out (struct page *page) {
 static void
 anon_destroy (struct page *page) {
 	struct anon_page *anon_page = &page->anon;
+	struct thread *curr = thread_current();
+
+	/* spt table에서 destroy할 페이지를 삭제한다. */
+	// spt_remove_page(&curr->spt, page);
+
+	if (pml4_get_page(curr->pml4, page->va) != NULL) {
+		/* frame_table에서 페이지에 매핑된 프레임을 삭제한다. */
+		list_remove(&page->frame->frame_elem);
+
+		/* 페이지 - 프레임 사이 매핑을 해제한다. */
+		pml4_clear_page(curr->pml4, page->va);
+	}
+
+	/* 페이지에 매핑된 프레임이 할당되어 있다면 해제한다. */
+	// if (page->frame->kva != NULL) {
+	// 	palloc_free_page(page->frame->kva);
+	// }
 }
