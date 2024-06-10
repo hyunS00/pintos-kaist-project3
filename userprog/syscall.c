@@ -12,6 +12,7 @@
 #include "filesys/file.h"
 #include "threads/palloc.h"
 #include <string.h>
+#include "vm/file.h"
 
 #include "userprog/process.h"
 // #include "string.h"
@@ -64,6 +65,9 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	uint64_t arg4 = f->R.r10;
 	uint64_t arg5 = f->R.r8;
 	uint64_t arg6 = f->R.r9;
+	struct thread *cur = thread_current();
+	//printf("syscall: %d\n", f->rsp);
+	cur->user_rsp = f->rsp;
 
 	// check validity
 	switch (f->R.rax)
@@ -137,6 +141,14 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	case SYS_CLOSE:
 		close((int)arg1);
 		break;
+
+	case SYS_MMAP:
+		f->R.rax = (void *)mmap((void *)arg1, (size_t)arg2, (int)arg3, (int)arg4, (off_t)arg5);
+		break;
+
+	case SYS_MUNMAP:
+		munmap((void *)arg1);
+		break; 
 
 	default:
 		exit(-1);
@@ -224,6 +236,19 @@ int read(int fd, void *buffer, unsigned length)
 		if (fp == NULL)
 			exit(-1);
 		lock_acquire(&filesys_lock);
+
+		struct page *page = spt_find_page(&thread_current()->spt,buffer);
+
+		if(!page){
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
+			
+		if(!page->writable){
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
+
 		str_cnt = file_read(fp, buffer, length);
 		lock_release(&filesys_lock);
 		break;
@@ -321,4 +346,36 @@ int exec(const char *file)
 	strlcpy(temp, file, strlen(file) + 1);
 	sema_down(&thread_current()->sema_load);
 	return process_exec(temp);
+}
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset){
+	
+	if (addr == 0 || !is_user_vaddr(addr))
+        return NULL;
+
+    if (length == 0 || offset < 0 || (offset % PGSIZE) != 0 || pg_ofs(addr) != 0)
+        return NULL;
+
+    if (fd < 2)
+        return NULL;
+
+    struct file *file = fd_to_file(fd);
+
+    if (file == NULL)
+        return NULL;
+
+	// 추가 검사: addr부터 addr + length - 1까지의 주소 범위가 커널 영역 내에 있는지 확인
+    if (is_kernel_vaddr(addr + length - 1))
+        return NULL;
+    
+    // 추가 검사: addr + length가 커널 영역의 시작 주소보다 큰 경우 차단
+    if (addr + length > KERN_BASE)
+        return NULL;
+
+    return do_mmap(addr, length, writable, file, offset);
+}
+
+void munmap (void *addr){
+	
+	address_check(addr);
+	do_munmap(addr);
 }

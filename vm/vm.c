@@ -227,8 +227,20 @@ vm_get_frame(void)
 
 /* Growing the stack. */
 static void
-vm_stack_growth(void *addr UNUSED)
+vm_stack_growth(void *addr)
 {
+    void *stack_bottom = pg_round_down(addr);
+    size_t stack_size = USER_STACK - (uintptr_t)stack_bottom;
+    size_t num_pages = (stack_size + PGSIZE - 1) / PGSIZE;
+    
+    for (size_t i = 0; i < num_pages; i++) {
+        void *page_addr = (void *)((uintptr_t)stack_bottom + i * PGSIZE);
+
+        if (vm_alloc_page(VM_ANON | VM_MARKER_0, page_addr, true) && !vm_claim_page(page_addr)) {
+            struct page *page = spt_find_page(&thread_current()->spt, page_addr);
+            vm_dealloc_page(page);
+        }
+    }
 }
 
 /* Handle the fault on write_protected page */
@@ -243,14 +255,32 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 {
 
 	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
+	uintptr_t rsp;
+	if(user)
+		rsp = f->rsp;
+	else
+		rsp = thread_current()->user_rsp;
 
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	// printf("addr: %d user: %d write: %d not_present: %d\n",addr, user, write, not_present);
+
 	/* 1. 커널 주소에대한 접근인지 확인한다 */
 	if(is_kernel_vaddr(addr))
 		exit(-1);
 
+	/* 스택 늘려주기 */
+	// if((USER_STACK - (1 << 20) <= rsp - 8 && rsp - 8 == addr && addr <= USER_STACK) || (USER_STACK - (1 << 20) <= rsp && rsp <= addr && addr <= USER_STACK)) {
+	// 	addr = pg_round_down(addr);
+	// if(USER_STACK - (1 << 20) <= (rsp - 8) && (rsp - 8) <= addr && addr <= USER_STACK){
+	// 	vm_stack_growth(addr);
+		
+	// 	return true;
+	// }
+
+	if (USER_STACK - 0x100000 <= addr && USER_STACK >= addr && rsp - 8 <= addr) {
+            vm_stack_growth(addr);
+            return true;
+    }
 	/* spt에서 해당하는 page를 찾아온다. */
 	addr = pg_round_down(addr);
 	struct page *page = spt_find_page(spt, addr);
@@ -258,6 +288,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	if (page == NULL)
 		exit(-1);
 
+	/* 쓰기로 접근했지만 페이지가 읽기전용일때 exit(-1) */
 	if(write && !page->writable)
 		exit(-1);
 
@@ -270,7 +301,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* 2. Bogus fault인지 확인한다. */
 	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
 			swap-out된 페이지에 대한 PF이다. */
-	if (page->type != VM_UNINIT || page != NULL)
+	if (page->operations->type != VM_UNINIT || page != NULL)
 	{
 		if (vm_do_claim_page(page))
 			return true;
@@ -368,15 +399,43 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			/* 부모 페이지의 필드들을 갖고와 같은 설정으로 자식 페이지를 할당한다. */
 			/* 사실상 UNINIT 페이지는 존재하지 않는다? */
 			case VM_UNINIT:
-				if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
-					return false;
+				{
+					if(aux != NULL) {
+						struct file_page *new_aux = (struct file_page *) malloc(sizeof(struct file_page));
+						memcpy(new_aux, aux, sizeof(struct file_page));
+						aux = new_aux;
+					}
+					if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
+						return false;
 				
-				break;
-			
+					break;
+				}
 			/* UNINIT 상태가 아니라면 물리 프레임에 매핑하는 작업까지 수행한다. */
 			/* aux가 필요하지 않은 이유?
 				- aux는 lazy loading을 위해 */
 			/* TODO: VM_FILE, VM_ANON에 대해 구분이 필요하다면 추가해주어야 한다. */
+			case VM_FILE:
+				{
+				struct page *dst_page;
+				struct file_page *file_page = malloc(sizeof(struct file_page));
+				struct file_page *src_file = &src_page->file;
+				file_page->file = file_reopen(src_file->file);
+				//file_page->is_segment = src_file->is_segment;
+				file_page->offset = src_file->offset;
+				file_page->read_bytes = src_file->read_bytes;
+				file_page->total_page = src_file->total_page;
+				file_page->zero_bytes = src_file ->zero_bytes;
+
+				if (vm_alloc_page_with_initializer(VM_FILE, upage, src_page->writable, NULL, file_page) && !vm_claim_page(upage)) {
+					dst_page = spt_find_page(&thread_current()->spt, upage);
+            		vm_dealloc_page(dst_page);
+				}
+				dst_page = spt_find_page(&thread_current()->spt, upage);
+				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+				break;
+			}
+				break;
+
 			default:
 			{
 				if (!vm_alloc_page(type, upage, writable) || !vm_claim_page(upage)) {
@@ -387,7 +446,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 				if (dst_page == NULL) {
 					return false;
 				}
-				
+				// 페이지를 복사
 				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
 			}
 
