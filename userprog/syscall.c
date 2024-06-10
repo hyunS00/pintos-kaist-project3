@@ -232,25 +232,19 @@ int read(int fd, void *buffer, unsigned length)
 		fp = fd_to_file(fd);
 		if (fp == NULL)
 			exit(-1);
-		lock_acquire(&filesys_lock);
+		
 		struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
-		if (page == NULL)
+		if (page == NULL || !page->writable)
 		{
-			lock_release(&filesys_lock);
 			exit(-1);
 		}
 
 		if (page_get_type(page) == VM_FILE && page->file.is_segment)
 		{
-			lock_release(&filesys_lock);
 			exit(-1);
 		}
 
-		if (!page->writable)
-		{
-			lock_release(&filesys_lock);
-			exit(-1);
-		}
+		lock_acquire(&filesys_lock);
 		str_cnt = file_read(fp, buffer, length);
 		lock_release(&filesys_lock);
 		break;

@@ -113,14 +113,12 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 		aux->read_bytes = page_read_bytes;
 		aux->zero_bytes = page_zero_bytes;
         aux->total_page = total_page_count;
-        lock_acquire(&vm_lock);
+        
 		if (!vm_alloc_page_with_initializer(VM_FILE, addr, writable, NULL, aux))
 		{
 			free(aux);                                        
-    	    lock_release(&vm_lock);
 			return NULL;
 		}
-        lock_release(&vm_lock);
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         addr += PGSIZE;
