@@ -140,6 +140,14 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		close((int)arg1);
 		break;
 
+	case SYS_MMAP:
+		f->R.rax = mmap((void *)arg1, (size_t) arg2, (int) arg3, (int) arg4, (off_t) arg5);
+		break;
+
+	case SYS_MUNMAP:
+		munmap((void *)arg1);
+		break;
+
 	default:
 		exit(-1);
 		break;
@@ -172,7 +180,6 @@ int write(int fd, const void *buffer, unsigned length)
 	switch (fd)
 	{
 	case STDIN_FILENO:
-		/* need to set errno to EBADF (Bad File Descriptor) */
 		str_cnt = -1;
 		break;
 	case STDOUT_FILENO:
@@ -226,6 +233,24 @@ int read(int fd, void *buffer, unsigned length)
 		if (fp == NULL)
 			exit(-1);
 		lock_acquire(&filesys_lock);
+		struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
+		if (page == NULL)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
+
+		if (page_get_type(page) == VM_FILE && page->file.is_segment)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
+
+		if (!page->writable)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
 		str_cnt = file_read(fp, buffer, length);
 		lock_release(&filesys_lock);
 		break;
@@ -235,26 +260,39 @@ int read(int fd, void *buffer, unsigned length)
 
 bool create(const char *file, unsigned initial_size)
 {
-	return filesys_create(file, initial_size);
+	lock_acquire(&filesys_lock);
+	bool success = filesys_create(file, initial_size);
+	lock_release(&filesys_lock);
+	
+	return success;
 }
 
 bool remove(const char *file)
 {
-	return filesys_remove(file);
+	lock_acquire(&filesys_lock);
+	bool success = filesys_remove(file);
+	lock_release(&filesys_lock);
+
+	return success;
 }
 
 int open(const char *file)
 {
-	struct file *param = filesys_open(file);
-	if (param == NULL)
-		return -1;
-	return thread_add_file(param);
+    lock_acquire(&filesys_lock);
+    struct file *param = filesys_open(file);
+    int fd = -1;
+    if (param != NULL)
+        fd = thread_add_file(param);
+    lock_release(&filesys_lock);
+    return fd;
 }
 
 int filesize(int fd)
 {
 	struct file *param = fd_to_file(fd);
-	return file_length(param);
+	int size = file_length(param);
+
+	return size;
 }
 
 void seek(int fd, unsigned position)
@@ -276,9 +314,12 @@ void close(int fd)
 	struct file *param = fd_to_file(fd);
 	if (param == NULL)
 		exit(-1);
+	
 	thread_current()->fdt[fd] = NULL;
 	thread_current()->nex_fd = fd;
+	lock_acquire(&filesys_lock);
 	file_close(param);
+	lock_release(&filesys_lock);
 }
 
 /* fd -> struct file* */
@@ -325,12 +366,31 @@ int exec(const char *file)
 	return process_exec(temp);
 }
 
-// void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
-// 	1. fd로 열린 파일의 offset 바이트부터 length 바이트를 addr에 매핑
-// 	2. 1)로 인해 addr에는 전체 파일이 매핑될 것
-// 	3. 
-// }
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
+	if (addr == NULL || is_kernel_vaddr(addr))
+		return NULL;
 
-// void munmap (void *addr) {
+	if (pg_ofs(addr) != 0 || length == 0 || offset < 0 || (offset % PGSIZE) != 0)
+    	return NULL;
+	
+	if (fd < 2)
+		return NULL;
 
-// }
+	struct file *file = fd_to_file(fd);
+	if (file == NULL)
+		return NULL;
+	
+	// addr부터 addr + length - 1까지의 주소 범위가 커널 영역 내에 있는지 확인
+    if (is_kernel_vaddr(addr + length - 1))
+        return NULL;
+    
+   // addr + length가 커널 영역의 시작 주소보다 큰 경우 차단
+    if (addr + length > KERN_BASE)
+        return NULL;
+
+	return do_mmap(addr, length, writable, file, offset);
+}
+
+void munmap (void *addr) {
+	do_munmap(addr);
+} 
