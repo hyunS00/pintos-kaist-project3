@@ -152,7 +152,7 @@ void syscall_handler(struct intr_frame *f UNUSED)
 		break;
 	
 	case SYS_MUNMAP:
-		address_check((void *)arg1);
+		// address_check((void *)arg1);
 		munmap((void *)arg1);
 		break;
 
@@ -219,10 +219,11 @@ int read(int fd, void *buffer, unsigned length)
 	/* buffer가 위치한 page가 writable한지 확인한다. */
 	struct page *page = spt_find_page(&thread_current()->spt, buffer);
 	if (!page->writable) {
-		// printf("page is not writable.\n");
-		/* TODO: 왜 exit(-1)이지? */
-		// exit(-1);
-		return -1;
+		/* TODO: 왜 exit(-1)이지? 
+			- pt-write-code2에서 반환값을 받지 않기 때문에
+			- 여기서 exit(-1)을 해주어야 한다. */
+		exit(-1);
+		// return -1;
 	}
 
 	struct file *fp = NULL;
@@ -251,6 +252,17 @@ int read(int fd, void *buffer, unsigned length)
 		fp = fd_to_file(fd);
 		if (fp == NULL)
 			exit(-1);
+		
+		struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
+        if (page == NULL || !page->writable)
+        {
+            exit(-1);
+        }
+        if (page_get_type(page) == VM_FILE)
+        {
+            exit(-1);
+        }
+
 		lock_acquire(&filesys_lock);
 		str_cnt = file_read(fp, buffer, length);
 		lock_release(&filesys_lock);
@@ -260,21 +272,30 @@ int read(int fd, void *buffer, unsigned length)
 }
 
 bool create(const char *file, unsigned initial_size)
-{
-	return filesys_create(file, initial_size);
+{	
+	lock_acquire(&filesys_lock);
+    bool success = filesys_create(file, initial_size);
+    lock_release(&filesys_lock);
+    return success;
 }
 
 bool remove(const char *file)
 {
-	return filesys_remove(file);
+	lock_acquire(&filesys_lock);
+    bool success = filesys_remove(file);
+    lock_release(&filesys_lock);
+    return success;
 }
 
 int open(const char *file)
 {
-	struct file *param = filesys_open(file);
-	if (param == NULL)
-		return -1;
-	return thread_add_file(param);
+	lock_acquire(&filesys_lock);
+    struct file *param = filesys_open(file);
+    int fd = -1;
+    if (param != NULL)
+        fd = thread_add_file(param);
+    lock_release(&filesys_lock);
+    return fd;
 }
 
 int filesize(int fd)
@@ -304,7 +325,10 @@ void close(int fd)
 		exit(-1);
 	thread_current()->fdt[fd] = NULL;
 	thread_current()->nex_fd = fd;
+
+	lock_acquire(&filesys_lock);
 	file_close(param);
+	lock_release(&filesys_lock);
 }
 
 /* fd -> struct file* */

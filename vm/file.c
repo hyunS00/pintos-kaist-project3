@@ -67,6 +67,8 @@ file_backed_destroy (struct page *page) {
 	// 이거 하면 터짐
 	// spt_remove_page(&curr->spt, page);
 
+	lock_acquire(&vm_lock);
+
 	if (pml4_is_dirty(curr->pml4, page->va)) {
 		/* 페이지 단위로 파일을 쪼개놨으므로 그만큼만 write back한다. 
 			file_length()를 쓰면 안됨. */
@@ -87,6 +89,8 @@ file_backed_destroy (struct page *page) {
 		/* 매핑을 삭제한다. */
 		pml4_clear_page(&thread_current()->pml4, page->va);
 	}
+
+	lock_release(&vm_lock);
 }
 
 /* mmap flow: 
@@ -106,7 +110,7 @@ do_mmap (void *addr, size_t length, int writable,
 		(하나의 파일에 대해 여러 페이지가 생성될 때)
 		- 한 페이지마다 파일을 reopen할 것인가
 		- 같은 파일에 매핑된 모든 페이지에 대해 파일을 한 번 reopen할 것인가 */
-	file = file_reopen(file);
+	// file = file_reopen(file);
 
 	/* file_length: 794, length: 4096
 		- file의 실제 길이와, 내가 매핑하고자 하는 길이가 다르다. */
@@ -147,8 +151,8 @@ do_mmap (void *addr, size_t length, int writable,
 		if (aux == NULL)
 			return NULL;
 
-		// aux->file = file_reopen(file);
-		aux->file = file;
+		aux->file = file_reopen(file);
+		// aux->file = file;
 		aux->offset = offset;
 		aux->read_bytes = read_bytes;
 		aux->zero_bytes = page_zero_bytes;
@@ -194,6 +198,8 @@ do_munmap (void *addr) {
 
 	for (int i = 0; i < pg_cnt; i++) {
 		/* write back */
+		lock_acquire(&vm_lock);
+
 		if (pml4_is_dirty(curr->pml4, page->va)) {
 			// printf("Trying to write back\n");
 			/* 페이지 단위로 파일을 쪼개놨으므로 그만큼만 write back한다. 
@@ -215,8 +221,10 @@ do_munmap (void *addr) {
 			/* 매핑을 삭제한다. */
 			pml4_clear_page(curr->pml4, page->va);
 		}
-		/* */
+		/* TODO: file_close 관련해서 주가해줌 */
 		hash_delete(&curr->spt, &page->hash_elem);
+
+		lock_release(&vm_lock);
 
 		/* file_reopen을 한 파일에 묶여있는 페이지들에 대해 한 번만 수행했으므로
 			file_close는 destroy에서 수행한다. */

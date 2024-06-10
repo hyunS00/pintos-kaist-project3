@@ -35,6 +35,9 @@ enum vm_type {
 struct page_operations;
 struct thread;
 
+/* global lock for files */
+struct lock vm_lock;
+
 #define VM_TYPE(type) ((type) & 7)
 
 /* The representation of "page".

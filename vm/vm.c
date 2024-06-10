@@ -33,6 +33,8 @@ void vm_init(void)
 
 	/* init frame_table */
 	list_init(&frame_table);
+	/* init file lock */
+	lock_init(&vm_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -220,7 +222,10 @@ vm_get_frame(void)
 	// ASSERT (frame->page == NULL);
 
 	/* frame table에 생성된 frame을 추가해준다. */
+	lock_acquire(&vm_lock);
 	list_push_front(&frame_table, &frame->frame_elem);
+	lock_release(&vm_lock);
+
 	return frame;
 }
 
@@ -439,7 +444,12 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			{
 				// 자식도 파일 로드
 				// 매핑까지
-				if (!vm_alloc_page(type, upage, writable) || !vm_claim_page(upage)) {
+				struct file_page *new_aux = (struct file_page *)malloc(sizeof(struct file_page));
+				/* 자식이 파일을 열었으니까 또 reopen 해줘야한다. */
+				memcpy(new_aux, &src_page->file, sizeof(struct file_page));
+				new_aux->file = file_reopen(src_page->file.file);
+				
+				if (!vm_alloc_page_with_initializer(type, upage, writable, NULL, new_aux) || !vm_claim_page(upage)) {
 					return false;
 				}
 				
@@ -450,7 +460,7 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 				
 				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
 
-				
+				break;
 			}
 
 			default:
