@@ -232,6 +232,13 @@ int read(int fd, void *buffer, unsigned length)
 		if (fp == NULL)
 			exit(-1);
 		lock_acquire(&filesys_lock);
+
+		struct page *page = spt_find_page(&thread_current()->spt, buffer);
+		if (page == NULL || page->writable == 0)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
 		str_cnt = file_read(fp, buffer, length);
 		lock_release(&filesys_lock);
 		break;
@@ -241,19 +248,28 @@ int read(int fd, void *buffer, unsigned length)
 
 bool create(const char *file, unsigned initial_size)
 {
-	return filesys_create(file, initial_size);
+	// lock_acquire(&filesys_lock);
+	bool success = filesys_create(file, initial_size);
+	// lock_release(&filesys_lock);
+
+	return success;
 }
 
 bool remove(const char *file)
 {
-	return filesys_remove(file);
+	bool success = filesys_remove(file);
+
+	return success;
 }
 
 int open(const char *file)
 {
+	// lock_acquire(&filesys_lock);
 	struct file *param = filesys_open(file);
+	// lock_release(&filesys_lock);
 	if (param == NULL)
 		return -1;
+
 	return thread_add_file(param);
 }
 
@@ -265,8 +281,10 @@ int filesize(int fd)
 
 void seek(int fd, unsigned position)
 {
+	// lock_acquire(&filesys_lock);
 	struct file *param = fd_to_file(fd);
 	file_seek(param, position);
+	// lock_release(&filesys_lock);
 }
 
 unsigned tell(int fd)
@@ -284,7 +302,9 @@ void close(int fd)
 		exit(-1);
 	thread_current()->fdt[fd] = NULL;
 	thread_current()->nex_fd = fd;
+	// lock_acquire(&filesys_lock);
 	file_close(param);
+	// lock_release(&filesys_lock);
 }
 
 /* fd -> struct file* */
@@ -333,19 +353,23 @@ int exec(const char *file)
 
 void *mmap(void *addr, size_t length, int writable, int fd, off_t offset)
 {
-	if (addr == 0 || !is_user_vaddr(addr) || pg_ofs(addr) != 0)
+	if (addr == NULL || is_kernel_vaddr(addr))
 		return NULL;
-	if (length == 0 || offset < 0 || (offset % PGSIZE) != 0)
+	if (pg_ofs(addr) != 0 || length == 0 || offset < 0 || (offset % PGSIZE) != 0)
 		return NULL;
 	if (fd < 2)
 		return NULL;
 	struct file *file = fd_to_file(fd);
 	if (file == NULL)
 		return NULL;
+	if (is_kernel_vaddr(addr + length - 1))
+		return NULL;
+	if (addr + length > KERN_BASE)
+		return NULL;
 	return do_mmap(addr, length, writable, file, offset);
 }
 
 void munmap(void *addr)
 {
-	return do_munmap(addr);
+	do_munmap(addr);
 }

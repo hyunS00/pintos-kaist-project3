@@ -29,6 +29,7 @@ void vm_init(void)
 
 	/* init frame_table */
 	list_init(&frame_table);
+	lock_init(&vm_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -201,9 +202,11 @@ vm_evict_frame(void)
 static struct frame *
 vm_get_frame(void)
 {
+	// lock_acquire(&vm_lock);
 	/* TODO: Fill this function. */
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
 	frame->kva = palloc_get_page(PAL_USER);
+	// lock_release(&vm_lock);
 
 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
 		일단 PANIC(todo)로 둔다. */
@@ -215,32 +218,29 @@ vm_get_frame(void)
 
 	ASSERT(frame != NULL);
 	// ASSERT (frame->page == NULL);
-
+	// lock_acquire(&vm_lock);
 	/* frame table에 생성된 frame을 추가해준다. */
 	list_push_front(&frame_table, &frame->frame_elem);
+	// lock_release(&vm_lock);
 	return frame;
 }
 
-/* Growing the stack. */
 static void
-vm_stack_growth(void *addr UNUSED)
+vm_stack_growth(void *addr)
 {
-	/* 전달받은 rps 포인터가 페이지 단위로 나누어져 있다는 보장이 없다.
-	 */
-	addr = pg_round_down(addr);
+	void *stack_bottom = pg_round_down(addr);
+	size_t stack_size = USER_STACK - (uintptr_t)stack_bottom;
+	size_t num_pages = (stack_size < PGSIZE) ? 1 : ((stack_size % PGSIZE == 0) ? stack_size / PGSIZE : stack_size / PGSIZE + 1);
 
-	/* stack_bottom에 해당하는 공간에 페이지를 할당한다.
-		일단은 uninit으로. */
-	/* round_down 안하는 이유?
-		stack_bottom에 해당하는 공간에 페이지를 할당해주어야 하므로
-		round_down하면 안된다. */
-
-	/* marker 뭐지*/
-	if (vm_alloc_page(VM_ANON | VM_MARKER_0, addr, true) && !vm_claim_page(addr))
+	for (size_t i = 0; i < num_pages; i++)
 	{
-		struct page *page = spt_find_page(&thread_current()->spt, addr);
-		/* page 할당 실패했을 때*/
-		vm_dealloc_page(page);
+		void *page_addr = (void *)((uintptr_t)stack_bottom + i * PGSIZE);
+
+		if (vm_alloc_page(VM_ANON | VM_MARKER_0, page_addr, true) && !vm_claim_page(page_addr))
+		{
+			struct page *page = spt_find_page(&thread_current()->spt, page_addr);
+			vm_dealloc_page(page);
+		}
 	}
 }
 
@@ -315,6 +315,7 @@ void vm_dealloc_page(struct page *page)
 }
 
 /* Claim the page that allocate on VA. */
+/* 가상 메모리가 있는지 확인하고 vm_do_cliam_page를 호출하여 물리 프레임 할당을 성공하면 true 반환*/
 bool vm_claim_page(void *va UNUSED)
 {
 	/* TODO: Fill this function */
@@ -332,6 +333,7 @@ bool vm_claim_page(void *va UNUSED)
 }
 
 /* Claim the PAGE and set up the mmu. */
+/* 물리 프레임 할당 및 페이지 테이블에 저장*/
 static bool
 vm_do_claim_page(struct page *page)
 {
@@ -408,6 +410,38 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
 				return false;
 
+			break;
+		}
+
+		case VM_FILE:
+		{
+			struct page *dst_page;
+
+			struct file_page *file_page = malloc(sizeof(struct file_page));
+			struct file_page *src_file = &src_page->file;
+			file_page->file = file_reopen(src_file->file);
+			file_page->offset = src_file->offset;
+			file_page->read_bytes = src_file->read_bytes;
+			file_page->total_page = src_file->total_page;
+			file_page->zero_bytes = src_file->zero_bytes;
+
+			/* 페이지 초기화 작업*/
+			if (vm_alloc_page_with_initializer(VM_FILE, upage, src_page->writable, NULL, file_page) == false)
+			{
+				return false;
+			}
+
+			/* 할당된 가상 페이지 가져오기*/
+			dst_page = spt_find_page(&thread_current()->spt, upage);
+
+			/* 물리 프레임에 할당 작업*/
+			if (vm_claim_page(upage) == false)
+			{
+				vm_dealloc_page(dst_page);
+			}
+
+			/* 새롭게 할당된 물리 메모리에 기존에 있던 물리 메모리 내용을 복사한다*/
+			memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
 			break;
 		}
 
