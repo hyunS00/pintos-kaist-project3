@@ -18,8 +18,6 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
-#include "filesys/inode.h"
-
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -304,7 +302,6 @@ process_exit(void) {
 	}
 
 	palloc_free_multiple(curr->fdt, 1);
-	/* 순서 바꾼다 */
 	file_close(curr->fp);
 	process_cleanup();
 }
@@ -441,8 +438,6 @@ load(const char *file_name, struct intr_frame *if_) {
 		goto done;
 	}
 	t->fp = file;
-	// <--- argument passing ---> //
-	file_deny_write(file);
 
 	/* Read and verify executable header. */
 	if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 0x3E // amd64
@@ -557,7 +552,9 @@ load(const char *file_name, struct intr_frame *if_) {
 	if_->rsp -= sizeof(void *);
 	memset(if_->rsp, 0, sizeof(void *));
 
-	
+	// <--- argument passing ---> //
+	file_deny_write(file);
+
 	success = true;
 	// palloc_free_page(argv);
 done:

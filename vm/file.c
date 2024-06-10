@@ -68,8 +68,6 @@ file_backed_destroy (struct page *page) {
 	// spt_remove_page(&curr->spt, page);
 
 	if (pml4_is_dirty(curr->pml4, page->va)) {
-		// printf("Trying to write back\n");
-
 		/* 페이지 단위로 파일을 쪼개놨으므로 그만큼만 write back한다. 
 			file_length()를 쓰면 안됨. */
 		file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
@@ -77,12 +75,7 @@ file_backed_destroy (struct page *page) {
 		pml4_set_dirty(curr->pml4, page->va, false);
 	}
 	/* 파일을 닫는다. */
-	if (file_page->file != NULL) {
-
-		file_close(file_page->file);
-		printf("		close @ destroy!\n");
-	}
-
+	file_close(file_page->file);
 
 	/* free page는 호출자가 처리해야 한다. 
 	------ 아래 삭제 */
@@ -103,7 +96,7 @@ void *
 do_mmap (void *addr, size_t length, int writable,
 		struct file *file, off_t offset) {
 	/* TODO: 유효성 체크는 mmap()에서 */
-
+	
 	/* file_read를 사용하지 않는 이유
 		- file_reopen으로 페이지 참조 카운트를 하나씩 올려주면서 파일 구조체에 넣어주었다. 
 		- 한 페이지에 달린 file 필드 자체에는 한 개의 파일이 통째로 들어가지만
@@ -114,8 +107,6 @@ do_mmap (void *addr, size_t length, int writable,
 		- 한 페이지마다 파일을 reopen할 것인가
 		- 같은 파일에 매핑된 모든 페이지에 대해 파일을 한 번 reopen할 것인가 */
 	file = file_reopen(file);
-	// printf("		reopen !\n");
-
 
 	/* file_length: 794, length: 4096
 		- file의 실제 길이와, 내가 매핑하고자 하는 길이가 다르다. */
@@ -137,6 +128,11 @@ do_mmap (void *addr, size_t length, int writable,
 	/* TODO: ASSERT 추가? */
 	while (read_bytes > 0 || zero_bytes > 0)
 	{	
+		/* for. mmap-kernel */
+		/* addr ~ +PGSIZE만큼 공간에 페이지 할당이 가능한지 확인한다. */
+		if (is_kernel_vaddr(addr + PGSIZE))
+			return NULL;
+
 		/* 이미 페이지가 있으면 리턴한다. */
 		struct page *page = spt_find_page(&thread_current()->spt, addr);
 		if (page != NULL) {
@@ -149,10 +145,9 @@ do_mmap (void *addr, size_t length, int writable,
 
 		struct file_page *aux = malloc(sizeof(struct file_page));
 		if (aux == NULL)
-			return false;
+			return NULL;
 
 		// aux->file = file_reopen(file);
-		// printf("		reopen !\n");
 		aux->file = file;
 		aux->offset = offset;
 		aux->read_bytes = read_bytes;
@@ -220,18 +215,16 @@ do_munmap (void *addr) {
 			/* 매핑을 삭제한다. */
 			pml4_clear_page(curr->pml4, page->va);
 		}
+		/* */
+		hash_delete(&curr->spt, &page->hash_elem);
 
 		/* file_reopen을 한 파일에 묶여있는 페이지들에 대해 한 번만 수행했으므로
 			file_close는 destroy에서 수행한다. */
-		if (file_page->file != NULL) {
-			file_close(file_page->file);
-			printf("		close @ unmap!\n");
+		// file_close(file_page->file);
+		
 		/* 다음 페이지 삭제 */ 
 		/* page->va가 페이지마다 바뀔 수 있도록 새로 페이지를 찾아주어야한다. */
 		addr += PGSIZE;
 		page = spt_find_page(&curr->spt, addr);
-
-
-		}
 	}
 }

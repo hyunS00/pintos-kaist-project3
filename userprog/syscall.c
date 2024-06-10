@@ -355,10 +355,13 @@ void
 *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
 	if (addr == NULL || !is_user_vaddr(addr) || pg_ofs(addr) != 0) 
 		return NULL;
-	if (length == 0 || offset < 0 || (offset % PGSIZE) != 0)
+	if (length <= 0 || offset < 0 || (offset % PGSIZE) != 0)
 		return NULL;
 	if (fd < 2)
 		return NULL;
+	/* for. mmap-kernel */
+	// if (is_kernel_vaddr(addr + length - 1))
+	// 	return NULL;
 	
 	struct file *file = fd_to_file(fd);
 	if (file == NULL)

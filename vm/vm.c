@@ -435,7 +435,24 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			/* aux가 필요하지 않은 이유?
 				- aux는 lazy loading을 위해 */
 			/* TODO: VM_FILE, VM_ANON에 대해 구분이 필요하다면 추가해주어야 한다. */
-			
+			case VM_FILE:
+			{
+				// 자식도 파일 로드
+				// 매핑까지
+				if (!vm_alloc_page(type, upage, writable) || !vm_claim_page(upage)) {
+					return false;
+				}
+				
+				struct page *dst_page = spt_find_page(dst, src_page->va);
+				if (dst_page == NULL) {
+					return false;
+				}
+				
+				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+
+				
+			}
+
 			default:
 			{
 				if (!vm_alloc_page(type, upage, writable) || !vm_claim_page(upage)) {
