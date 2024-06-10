@@ -63,6 +63,7 @@ anon_destroy (struct page *page) {
 
 		/* 페이지 - 프레임 사이 매핑을 해제한다. */
 		pml4_clear_page(curr->pml4, page->va);
+		palloc_free_page(page->frame->kva);
 	}
 	lock_release(&vm_lock);
 

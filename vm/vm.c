@@ -208,7 +208,9 @@ vm_get_frame(void)
 {
 	/* TODO: Fill this function. */
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
+	lock_acquire(&vm_lock);
 	frame->kva = palloc_get_page(PAL_USER);
+	lock_release(&vm_lock);
 
 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
 		일단 PANIC(todo)로 둔다. */

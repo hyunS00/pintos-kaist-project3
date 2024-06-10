@@ -172,7 +172,7 @@ pml4_for_each (uint64_t *pml4, pte_for_each_func *func, void *aux) {
 
 static void
 pt_destroy (uint64_t *pt) {
-	for (unsigned i = 0; i < PGSIZE / sizeof(uint64_t *); i++) {
+ 	for (unsigned i = 0; i < PGSIZE / sizeof(uint64_t *); i++) {
 		uint64_t *pte = ptov((uint64_t *) pt[i]);
 		if (((uint64_t) pte) & PTE_P)
 			palloc_free_page ((void *) PTE_ADDR (pte));

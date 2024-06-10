@@ -85,7 +85,8 @@ file_backed_destroy (struct page *page) {
 	if (pml4_get_page(curr->pml4, page->va) != NULL) {
 		/* frame_table에서 페이지에 매핑된 프레임을 삭제한다. */
 		list_remove(&page->frame->frame_elem);
-		// palloc_free_page(page->frame->kva);
+		/* 가상페이지를 해제하는게 아니라 물리 페이지를 해제해야함 */
+		palloc_free_page(page->frame->kva);
 		/* 매핑을 삭제한다. */
 		pml4_clear_page(&thread_current()->pml4, page->va);
 	}
