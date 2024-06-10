@@ -64,8 +64,9 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	uint64_t arg4 = f->R.r10;
 	uint64_t arg5 = f->R.r8;
 	uint64_t arg6 = f->R.r9;
-
+	thread_current()->user_rsp = f->rsp;
 	// check validity
+	// printf("syscall: %d\n",f->R.rax);
 	switch (f->R.rax)
 	{
 	case SYS_HALT:
@@ -137,7 +138,12 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	case SYS_CLOSE:
 		close((int)arg1);
 		break;
-
+	case SYS_MMAP:
+		f->R.rax = mmap((void *)arg1, (size_t) arg2, (int) arg3, (int) arg4, (off_t) arg5);
+		break;
+	case SYS_MUNMAP:
+		munmap((void *)arg1);
+		break;
 	default:
 		exit(-1);
 		break;
@@ -224,6 +230,24 @@ int read(int fd, void *buffer, unsigned length)
 		if (fp == NULL)
 			exit(-1);
 		lock_acquire(&filesys_lock);
+		struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
+		if (page == NULL)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
+
+		if (page_get_type(page) == VM_FILE && page->file.is_segment)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
+
+		if (!page->writable)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
 		str_cnt = file_read(fp, buffer, length);
 		lock_release(&filesys_lock);
 		break;
@@ -233,20 +257,32 @@ int read(int fd, void *buffer, unsigned length)
 
 bool create(const char *file, unsigned initial_size)
 {
-	return filesys_create(file, initial_size);
+    bool success;
+    lock_acquire(&filesys_lock);
+    success = filesys_create(file, initial_size);
+    lock_release(&filesys_lock);
+    return success;
+
 }
 
 bool remove(const char *file)
 {
-	return filesys_remove(file);
+	bool success;
+    lock_acquire(&filesys_lock);
+    success = filesys_remove(file);
+    lock_release(&filesys_lock);
+    return success;
 }
 
 int open(const char *file)
 {
-	struct file *param = filesys_open(file);
-	if (param == NULL)
-		return -1;
-	return thread_add_file(param);
+    lock_acquire(&filesys_lock);
+    struct file *param = filesys_open(file);
+    int fd = -1;
+    if (param != NULL)
+        fd = thread_add_file(param);
+    lock_release(&filesys_lock);
+    return fd;
 }
 
 int filesize(int fd)
@@ -276,7 +312,9 @@ void close(int fd)
 		exit(-1);
 	thread_current()->fdt[fd] = NULL;
 	thread_current()->nex_fd = fd;
+	lock_acquire(&filesys_lock);
 	file_close(param);
+	lock_release(&filesys_lock);
 }
 
 /* fd -> struct file* */
@@ -321,4 +359,33 @@ int exec(const char *file)
 	strlcpy(temp, file, strlen(file) + 1);
 	sema_down(&thread_current()->sema_load);
 	return process_exec(temp);
+}
+
+void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
+	if(addr == NULL ||is_kernel_vaddr(addr))
+		return NULL;
+
+	if (length == 0 || offset < 0 || (offset % PGSIZE) != 0 || pg_ofs(addr) != 0)
+		 return NULL;
+
+	if (fd < 2)
+        return NULL;
+
+	struct file *file = fd_to_file(fd);
+    if (file == NULL)
+        return NULL;
+
+	// 추가 검사: addr부터 addr + length - 1까지의 주소 범위가 커널 영역 내에 있는지 확인
+    if (is_kernel_vaddr(addr + length - 1))
+        return NULL;
+    
+    // 추가 검사: addr + length가 커널 영역의 시작 주소보다 큰 경우 차단
+    if (addr + length > KERN_BASE)
+        return NULL;
+
+	return do_mmap(addr, length, writable, file, offset);
+}
+
+void munmap (void *addr) {
+	do_munmap(addr);
 }

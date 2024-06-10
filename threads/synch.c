@@ -68,7 +68,6 @@ sema_down (struct semaphore *sema) {
 
 	ASSERT (sema != NULL);
 	ASSERT (!intr_context ());
-
 	enum intr_level old_level;
 	old_level = intr_disable ();
 	while (sema->value == 0) {

@@ -2,6 +2,7 @@
 
 #include "vm/vm.h"
 #include "devices/disk.h"
+#include "threads/mmu.h"
 
 /* DO NOT MODIFY BELOW LINE */
 static struct disk *swap_disk;
@@ -49,4 +50,14 @@ anon_swap_out (struct page *page) {
 static void
 anon_destroy (struct page *page) {
 	struct anon_page *anon_page = &page->anon;
+	uint64_t pml4 = thread_current()->pml4;
+
+	/* 페이지 테이블에 매핑됐다면 매핑 끊기 */
+	if(pml4_get_page(pml4, page->va) != NULL) {
+		pml4_clear_page(pml4, page->va); // 페이지 테이블 매핑 끊기
+		lock_acquire(&vm_lock);
+		palloc_free_page(page->frame->kva); // 물리 페이지 할당 해제
+		list_remove(&page->frame->frame_elem); // 프레임 리스트에서 프레임 제거
+		lock_release(&vm_lock);
+	}
 }

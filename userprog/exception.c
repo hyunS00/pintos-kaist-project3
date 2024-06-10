@@ -156,7 +156,6 @@ page_fault (struct intr_frame *f) {
 	// 	// printf("PF !!! \n");
 	// 	exit(-1);
 	// }
-
 	/* If the fault is true fault, show info and exit. */
 	printf ("Page fault at %p: %s error %s page in %s context.\n",
 			fault_addr,

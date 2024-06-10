@@ -28,6 +28,7 @@ void vm_init(void)
 
 	/* init frame_table */
 	list_init(&frame_table);
+	lock_init(&vm_lock);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -83,10 +84,6 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
 	/* Check wheter the upage is already occupied or not. */
 	if (spt_find_page(spt, upage) == NULL)
 	{
-		/* TODO: Create the page, fetch the initialier according to the VM type,
-		 * TODO: and then create "uninit" page struct by calling uninit_new. You
-		 * TODO: should modify the field after calling the uninit_new. */
-
 		/* malloc으로 유저 영역에 페이지 하나 할당 */
 		/* malloc을 쓰는 이유?
 			palloc은 물리 프레임, 즉 vm_get_frame에서 페이지를 생성할 때 사용한다.
@@ -200,9 +197,12 @@ vm_evict_frame(void)
 static struct frame *
 vm_get_frame(void)
 {
+	
 	/* TODO: Fill this function. */
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
+	lock_acquire(&vm_lock);
 	frame->kva = palloc_get_page(PAL_USER);
+	lock_release(&vm_lock);
 
 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
 		일단 PANIC(todo)로 둔다. */
@@ -215,15 +215,31 @@ vm_get_frame(void)
 	ASSERT(frame != NULL);
 	// ASSERT (frame->page == NULL);
 
+	lock_acquire(&vm_lock);
 	/* frame table에 생성된 frame을 추가해준다. */
 	list_push_front(&frame_table, &frame->frame_elem);
+	lock_release(&vm_lock);
 	return frame;
 }
 
-/* Growing the stack. */
 static void
-vm_stack_growth(void *addr UNUSED)
+vm_stack_growth(void *addr)
 {
+    void *stack_bottom = pg_round_down(addr);
+    size_t stack_size = USER_STACK - (uintptr_t)stack_bottom;
+    size_t num_pages = (stack_size + PGSIZE - 1) / PGSIZE;
+
+    // printf("Stack growth requested at 0x%X, size: %zu bytes, pages: %zu\n",
+    //        stack_bottom, stack_size, num_pages);
+
+    for (size_t i = 0; i < num_pages; i++) {
+        void *page_addr = (void *)((uintptr_t)stack_bottom + i * PGSIZE);
+        if (vm_alloc_page(VM_ANON | VM_MARKER_0, page_addr, true) && !vm_claim_page(page_addr)) {
+            printf("Page claim failed at 0x%X\n", page_addr);
+            struct page *page = spt_find_page(&thread_current()->spt, page_addr);
+            vm_dealloc_page(page);
+        }
+    }
 }
 
 /* Handle the fault on write_protected page */
@@ -238,13 +254,29 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 {
 
 	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
+	uintptr_t rsp ;
+
+
 
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
-	// printf("addr: %d user: %d write: %d not_present: %d\n",addr, user, write, not_present);
 	/* 1. 커널 주소에대한 접근인지 확인한다 */
+	// printf("addr:0x%x user:%d write:%d not_present:%d\n",addr,user,write,not_present);
 	if(is_kernel_vaddr(addr))
 		exit(-1);
+
+	if(user) {
+		rsp = f->rsp;
+	}
+	else
+		rsp = thread_current()->user_rsp;
+
+	// printf("rsp:0x%x\n",rsp);
+	/* 스택 성장 가능한지 체크 */
+	if(USER_STACK - (1 << 20) <= (rsp - 8) && (rsp - 8) <= addr && addr <= USER_STACK){
+        vm_stack_growth(addr);
+        return true;
+    }
 
 	/* spt에서 해당하는 page를 찾아온다. */
 	addr = pg_round_down(addr);
@@ -255,7 +287,6 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 
 	if(write && !page->writable)
 		exit(-1);
-
 	if (not_present)
 	{
 		/* 해당 가상 주소에 대한 페이지는 메모리에 존재하지만, r/o 페이지에 write 시도*/
@@ -265,11 +296,11 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* 2. Bogus fault인지 확인한다. */
 	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
 			swap-out된 페이지에 대한 PF이다. */
-	if (page->type != VM_UNINIT || page != NULL)
-	{
-		if (vm_do_claim_page(page))
-			return true;
-	}
+	// if (page->operations->type != VM_UNINIT || page != NULL)
+	// {
+	// 	if (vm_do_claim_page(page))
+	// 		return true;
+	// }
 	printf("handle fault\n");
 	return false;
 }
@@ -310,7 +341,6 @@ vm_do_claim_page(struct page *page)
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
-
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	struct thread *t = thread_current();
 	void *pml4 = t->pml4;
@@ -325,7 +355,6 @@ vm_do_claim_page(struct page *page)
 			return false;
 		}
 	}
-
 	return swap_in(page, frame->kva);
 }
 
@@ -363,11 +392,39 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			/* 부모 페이지의 필드들을 갖고와 같은 설정으로 자식 페이지를 할당한다. */
 			/* 사실상 UNINIT 페이지는 존재하지 않는다? */
 			case VM_UNINIT:
-				if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
-					return false;
+				{
+					if(aux != NULL) {
+						struct file_page *new_aux = (struct file_page *) malloc(sizeof(struct file_page));
+						memcpy(new_aux, aux, sizeof(struct file_page));
+						aux = new_aux;
+					}
+					if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
+						return false;
 				
+					break;
+				}
+			case VM_FILE:
+			/* 2) type이 file이면 */
+			{
+				struct page *dst_page;
+				struct file_page *file_page = malloc(sizeof(struct file_page));
+				struct file_page *src_file = &src_page->file;
+				file_page->file = file_reopen(src_file->file);
+				file_page->is_segment = src_file->is_segment;
+				file_page->offset = src_file->offset;
+				file_page->read_bytes = src_file->read_bytes;
+				file_page->total_page = src_file->total_page;
+				file_page->zero_bytes = src_file ->zero_bytes;
+
+				if (vm_alloc_page_with_initializer(VM_FILE, upage, src_page->writable, NULL, file_page) && !vm_claim_page(upage)) {
+					printf("Page claim failed at 0x%X\n", upage);
+					dst_page = spt_find_page(&thread_current()->spt, upage);
+            		vm_dealloc_page(dst_page);
+				}
+				dst_page = spt_find_page(&thread_current()->spt, upage);
+				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
 				break;
-			
+			}
 			/* UNINIT 상태가 아니라면 물리 프레임에 매핑하는 작업까지 수행한다. */
 			/* aux가 필요하지 않은 이유?
 				- aux는 lazy loading을 위해 */
@@ -388,7 +445,6 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 
 		}
 	}
-
 	return true;
 }
 
