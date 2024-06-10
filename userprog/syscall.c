@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+// #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -13,6 +14,7 @@
 #include <string.h>
 
 #include "userprog/process.h"
+// #include "string.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -62,11 +64,9 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	uint64_t arg4 = f->R.r10;
 	uint64_t arg5 = f->R.r8;
 	uint64_t arg6 = f->R.r9;
-
-	struct thread *cur = thread_current();
-	cur->user_rsp = f->rsp;
-
+	thread_current()->user_rsp = f->rsp;
 	// check validity
+	// printf("syscall: %d\n",f->R.rax);
 	switch (f->R.rax)
 	{
 	case SYS_HALT:
@@ -138,15 +138,12 @@ void syscall_handler(struct intr_frame *f UNUSED)
 	case SYS_CLOSE:
 		close((int)arg1);
 		break;
-
 	case SYS_MMAP:
 		f->R.rax = mmap((void *)arg1, (size_t)arg2, (int)arg3, (int)arg4, (off_t)arg5);
 		break;
-
 	case SYS_MUNMAP:
 		munmap((void *)arg1);
 		break;
-
 	default:
 		exit(-1);
 		break;
@@ -179,6 +176,7 @@ int write(int fd, const void *buffer, unsigned length)
 	switch (fd)
 	{
 	case STDIN_FILENO:
+		/* need to set errno to EBADF (Bad File Descriptor) */
 		str_cnt = -1;
 		break;
 	case STDOUT_FILENO:
@@ -232,9 +230,14 @@ int read(int fd, void *buffer, unsigned length)
 		if (fp == NULL)
 			exit(-1);
 		lock_acquire(&filesys_lock);
+		struct page *page = spt_find_page(&thread_current()->spt, pg_round_down(buffer));
+		if (page == NULL)
+		{
+			lock_release(&filesys_lock);
+			exit(-1);
+		}
 
-		struct page *page = spt_find_page(&thread_current()->spt, buffer);
-		if (page == NULL || page->writable == 0)
+		if (page->writable == 0)
 		{
 			lock_release(&filesys_lock);
 			exit(-1);
@@ -248,29 +251,31 @@ int read(int fd, void *buffer, unsigned length)
 
 bool create(const char *file, unsigned initial_size)
 {
-	// lock_acquire(&filesys_lock);
-	bool success = filesys_create(file, initial_size);
-	// lock_release(&filesys_lock);
-
+	bool success;
+	lock_acquire(&filesys_lock);
+	success = filesys_create(file, initial_size);
+	lock_release(&filesys_lock);
 	return success;
 }
 
 bool remove(const char *file)
 {
-	bool success = filesys_remove(file);
-
+	bool success;
+	lock_acquire(&filesys_lock);
+	success = filesys_remove(file);
+	lock_release(&filesys_lock);
 	return success;
 }
 
 int open(const char *file)
 {
-	// lock_acquire(&filesys_lock);
+	lock_acquire(&filesys_lock);
 	struct file *param = filesys_open(file);
-	// lock_release(&filesys_lock);
-	if (param == NULL)
-		return -1;
-
-	return thread_add_file(param);
+	int fd = -1;
+	if (param != NULL)
+		fd = thread_add_file(param);
+	lock_release(&filesys_lock);
+	return fd;
 }
 
 int filesize(int fd)
@@ -281,10 +286,8 @@ int filesize(int fd)
 
 void seek(int fd, unsigned position)
 {
-	// lock_acquire(&filesys_lock);
 	struct file *param = fd_to_file(fd);
 	file_seek(param, position);
-	// lock_release(&filesys_lock);
 }
 
 unsigned tell(int fd)
@@ -302,9 +305,9 @@ void close(int fd)
 		exit(-1);
 	thread_current()->fdt[fd] = NULL;
 	thread_current()->nex_fd = fd;
-	// lock_acquire(&filesys_lock);
+	lock_acquire(&filesys_lock);
 	file_close(param);
-	// lock_release(&filesys_lock);
+	lock_release(&filesys_lock);
 }
 
 /* fd -> struct file* */
@@ -355,17 +358,21 @@ void *mmap(void *addr, size_t length, int writable, int fd, off_t offset)
 {
 	if (addr == NULL || is_kernel_vaddr(addr))
 		return NULL;
-	if (pg_ofs(addr) != 0 || length == 0 || offset < 0 || (offset % PGSIZE) != 0)
+
+	if (length == 0 || offset < 0 || (offset % PGSIZE) != 0 || pg_ofs(addr) != 0)
 		return NULL;
+
 	if (fd < 2)
 		return NULL;
+
 	struct file *file = fd_to_file(fd);
 	if (file == NULL)
 		return NULL;
+
+	/* 마지막 할당 addr이 user 영역인지 확인*/
 	if (is_kernel_vaddr(addr + length - 1))
 		return NULL;
-	if (addr + length > KERN_BASE)
-		return NULL;
+
 	return do_mmap(addr, length, writable, file, offset);
 }
 

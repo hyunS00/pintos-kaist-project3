@@ -59,5 +59,10 @@ anon_destroy(struct page *page)
 
 	// frame 제거
 	if (page->frame != NULL)
+	{
+		lock_acquire(&vm_lock);
 		palloc_free_page(page->frame->kva);
+		list_remove(&page->frame->frame_elem);
+		lock_release(&vm_lock);
+	}
 }

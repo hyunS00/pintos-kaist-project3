@@ -202,11 +202,11 @@ vm_evict_frame(void)
 static struct frame *
 vm_get_frame(void)
 {
-	// lock_acquire(&vm_lock);
+	lock_acquire(&vm_lock);
 	/* TODO: Fill this function. */
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
 	frame->kva = palloc_get_page(PAL_USER);
-	// lock_release(&vm_lock);
+	lock_release(&vm_lock);
 
 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
 		일단 PANIC(todo)로 둔다. */
@@ -218,10 +218,10 @@ vm_get_frame(void)
 
 	ASSERT(frame != NULL);
 	// ASSERT (frame->page == NULL);
-	// lock_acquire(&vm_lock);
+	lock_acquire(&vm_lock);
 	/* frame table에 생성된 frame을 추가해준다. */
 	list_push_front(&frame_table, &frame->frame_elem);
-	// lock_release(&vm_lock);
+	lock_release(&vm_lock);
 	return frame;
 }
 

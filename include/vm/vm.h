@@ -35,7 +35,7 @@ enum vm_type
 
 struct page_operations;
 struct thread;
-struct lock *vm_lock;
+struct lock vm_lock;
 
 #define VM_TYPE(type) ((type) & 7)
 

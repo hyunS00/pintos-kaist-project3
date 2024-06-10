@@ -26,6 +26,8 @@ static void file_backed_destroy(struct page *page)
 {
 	uint64_t pml4 = thread_current()->pml4;
 	struct file_page *file_page = &page->file;
+
+	lock_acquire(&vm_lock);
 	if (pml4_is_dirty(pml4, page->va))
 	{
 		file_write_at(file_page->file, page->va, file_page->read_bytes, file_page->offset);
@@ -33,6 +35,7 @@ static void file_backed_destroy(struct page *page)
 	file_close(file_page->file);
 	list_remove(&page->frame->frame_elem);
 	pml4_clear_page(pml4, page->va);
+	lock_release(&vm_lock);
 }
 
 /* Swap in the page by read contents from the file. */
@@ -158,30 +161,6 @@ void do_munmap(void *addr)
 		page = spt_find_page(spt, addr);
 	}
 }
-
-// bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
-// {
-// 	struct file_page *file_page = (struct file_page *)page->uninit.aux;
-// 	struct file *file = file_page->file;
-// 	off_t offset = file_page->offset;
-// 	size_t page_read_bytes = file_page->read_bytes;
-// 	size_t page_zero_bytes = file_page->zero_bytes;
-
-// 	ASSERT(page->frame != NULL);
-// 	ASSERT(file != NULL);
-// 	ASSERT(offset >= 0);
-// 	ASSERT(page_read_bytes + page_zero_bytes == PGSIZE);
-
-// 	page->operations = &file_ops;
-
-// 	file_read_at(file, kva, page_read_bytes, offset);
-
-// 	memset(kva + page_read_bytes, 0, page_zero_bytes);
-
-// 	// free(file_page);
-
-// 	return true;
-// }
 
 bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
 {
