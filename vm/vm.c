@@ -30,6 +30,7 @@ void vm_init(void)
 
 	/* init frame_table */
 	list_init(&frame_table);
+	clock_hand = NULL;
 	lock_init(&vm_lock);
 }
 
@@ -173,8 +174,52 @@ static struct frame *
 vm_get_victim(void)
 {
 	struct frame *victim = NULL;
-	/* TODO: The policy for eviction is up to you. */
+	struct list_elem *fe;
+	struct frame *f;
 
+	lock_acquire(&vm_lock);
+
+	if (clock_hand == NULL){
+		clock_hand = list_begin(&frame_table);
+	}
+
+	/* 첫번째 for문 : lru clock부터 리스트 끝까지 돌기*/
+	for (fe = clock_hand; fe != list_tail(&frame_table); fe = list_next(fe)){
+		f = list_entry(fe, struct frame, frame_elem);
+		if (!pml4_is_accessed(thread_current()->pml4, f->page->va)){
+			victim = f;
+			clock_hand = list_remove(fe);
+			if (clock_hand == list_tail(&frame_table)){
+				clock_hand = list_begin(&clock_hand);
+			}
+			goto done;
+		}
+		else {
+			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
+		}
+	}
+
+	/* 두번째 for 문 : 처음부터 lru clock까지 돌기 */
+	for (fe = list_begin(&frame_table); fe != list_next(clock_hand); fe = list_next(fe)){
+		f = list_entry(fe, struct frame, frame_elem);
+		if (!pml4_is_accessed(thread_current()->pml4, f->page->va)){
+			victim = f;
+			clock_hand = list_remove(fe);
+			if (clock_hand == list_tail(&frame_table)){
+				
+				clock_hand = list_begin(&clock_hand);
+			}
+			goto done;
+		}
+		else{
+			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
+		}
+	}
+
+	goto done;
+
+done:
+	lock_release(&vm_lock);
 	return victim;
 }
 
@@ -183,10 +228,19 @@ vm_get_victim(void)
 static struct frame *
 vm_evict_frame(void)
 {
-	struct frame *victim UNUSED = vm_get_victim();
-	/* TODO: swap out the victim and return the evicted frame. */
-	/* 여기서 swap out 구현 */
-	return NULL;
+	struct frame *victim = NULL;
+
+    while (victim == NULL) {
+        victim = vm_get_victim();
+        if (victim == NULL)
+            return NULL;
+
+        if (swap_out(victim->page) == false) {
+            // swap_out 실패 시 다른 희생자 선택
+            victim = NULL;
+        }
+    }
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -200,6 +254,7 @@ vm_get_frame(void)
 
 	lock_acquire(&vm_lock);
 	frame->kva = palloc_get_page(PAL_USER);
+	frame->page = NULL;
 	lock_release(&vm_lock);
 
 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
@@ -207,11 +262,13 @@ vm_get_frame(void)
 	if (frame->kva == NULL)
 	{
 		/* vm_evict_frame 호출 */
-		PANIC("todo");
+		frame = vm_evict_frame();
+		frame->page = NULL;
 	}
 
 	ASSERT(frame != NULL);
-
+	ASSERT(frame->page == NULL);
+	
 	/* frame table에 생성된 frame을 추가해준다. */
 	lock_acquire(&vm_lock);
 	list_push_front(&frame_table, &frame->frame_elem);
@@ -227,9 +284,6 @@ vm_stack_growth(void *addr)
     void *stack_bottom = pg_round_down(addr);
     size_t stack_size = USER_STACK - (uintptr_t)stack_bottom;
     size_t num_pages = (stack_size + PGSIZE - 1) / PGSIZE;
-
-    // printf("Stack growth requested at 0x%X, size: %zu bytes, pages: %zu\n",
-    //        stack_bottom, stack_size, num_pages);
 
     for (size_t i = 0; i < num_pages; i++) {
         void *page_addr = (void *)((uintptr_t)stack_bottom + i * PGSIZE);
@@ -287,6 +341,12 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	{
 		/* 해당 가상 주소에 대한 페이지는 메모리에 존재하지만, r/o 페이지에 write 시도*/
 		return vm_do_claim_page(page);
+	}
+
+    if (page->operations->type != VM_UNINIT || page != NULL)
+    {
+        if (vm_do_claim_page(page))
+            return true;
 	}
 
 	/* 해당 내용 출력 시 try_handle_fault에서 예외처리 되지 못한 것 */

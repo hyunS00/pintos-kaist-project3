@@ -35,6 +35,7 @@ enum vm_type {
 struct page_operations;
 struct thread;
 struct lock vm_lock;
+struct list_elem *clock_hand;
 
 #define VM_TYPE(type) ((type) & 7)
 

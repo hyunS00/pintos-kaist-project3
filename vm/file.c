@@ -81,6 +81,7 @@ static void file_backed_destroy(struct page *page)
         if (pml4_is_dirty(thread_current()->pml4, page->va)) {
             file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
             pml4_set_dirty(thread_current()->pml4, page->va, 0);
+            pml4_set_accessed(thread_current()->pml4, page->va, 0);
         }
         file_close(file_page->file);
         pml4_clear_page(thread_current()->pml4, page->va);
