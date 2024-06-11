@@ -301,7 +301,7 @@ void close(int fd)
 {
 	if (fd < 0 || fd >= MAX_FDT)
 		exit(-1);
-		
+
 	struct file *param = fd_to_file(fd);
 	if (param == NULL)
 		exit(-1);
@@ -376,7 +376,7 @@ void *mmap (void *addr, size_t length, int writable, int fd, off_t offset) {
     if (is_kernel_vaddr(addr + length - 1))
         return NULL;
     
-   // addr + length가 커널 영역의 시작 주소보다 큰 경우 차단
+    // addr + length가 커널 영역의 시작 주소보다 큰 경우 차단
     if (addr + length > KERN_BASE)
         return NULL;
 

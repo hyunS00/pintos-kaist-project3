@@ -776,12 +776,14 @@ lazy_load_segment(struct page *page, void *aux)
 	if (kva == NULL)
 		return false;
 	
+	lock_acquire(&vm_lock);
 	/* 읽기 실패 */
 	if (file_read(file, kva, page_read_bytes) != (int)page_read_bytes)
 		return false;
 	
 	memset(kva + page_read_bytes, 0, page_zero_bytes);
-
+	lock_release(&vm_lock);
+	
 	free(aux);
 
 	return true;

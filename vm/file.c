@@ -49,7 +49,9 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
         return false;
 
     // Clear the remaining bytes
+    lock_acquire(&vm_lock);
     memset(kva + page_read_bytes, 0, page_zero_bytes);
+    lock_release(&vm_lock);
 
     // Free the allocated memory for file_page
     free(aux);
@@ -84,7 +86,7 @@ static void file_backed_destroy(struct page *page)
         pml4_clear_page(thread_current()->pml4, page->va);
         list_remove(&page->frame->frame_elem);
         palloc_free_page(page->frame->kva);
-        
+
 	    lock_release(&vm_lock);
     }
 }
