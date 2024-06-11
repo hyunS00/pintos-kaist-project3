@@ -66,12 +66,7 @@ do_mmap(void *addr, size_t length, int writable,
 	/* zero로 설정되는 길이 계산*/
 	size_t zero_bytes = PGSIZE - (read_bytes % PGSIZE);
 	/* 요청한 length 길이만큼 가상 메모리에 할당하기 위해서 몇 페이지가 필요한지 계산한다*/
-	if (length <= PGSIZE)
-	{
-		total_page_count = 1;
-	}
-
-	else if ((length % PGSIZE) == 0)
+	if ((length % PGSIZE) == 0)
 	{
 		total_page_count = length / PGSIZE;
 	}
@@ -150,7 +145,6 @@ void do_munmap(void *addr)
 		if (pml4_is_dirty(thread_current()->pml4, page->va))
 		{
 			file_write_at(target_file_page->file, addr, target_file_page->read_bytes, target_file_page->offset);
-			// pml4_set_dirty(&thread_current()->spt, page->va, 0);
 		}
 
 		file_backed_destroy(page);
