@@ -4,6 +4,7 @@
 #include "devices/disk.h"
 #include "threads/mmu.h"
 #include "lib/kernel/bitmap.h"
+#include "vm/anon.h"
 
 /* DO NOT MODIFY BELOW LINE */
 static struct disk *swap_disk;
@@ -31,68 +32,75 @@ void vm_anon_init(void)
 	bitmap_set_all(swap_table, false);
 }
 
-/* Initialize the file mapping */
 bool anon_initializer(struct page *page, enum vm_type type, void *kva)
 {
-	/* Set up the handler */
 	page->operations = &anon_ops;
 
 	struct anon_page *anon_page = &page->anon;
-	/* swap slot에 올라와 있지 않음을 표시하기 위함*/
+	/* swap_slot에 올라와 있지 않음 상태를 표현하기 위함*/
 	anon_page->swap_slot = -1;
 
 	return true;
 }
 
-/* 디스크에 있는 내용을 물리 메모리로 올린다*/
+/* 스왑 디스크에 있는 내용을 물리 메모리로 올린다 */
 static bool
 anon_swap_in(struct page *page, void *kva)
 {
 	struct anon_page *anon_page = &page->anon;
+	int swap_index = anon_page->swap_slot;
 
-	// 스왑 슬롯
-	size_t swap_slot = anon_page->swap_slot;
-	/* 해당 슬롯의 디스크 번호를 반환*/
-	disk_sector_t disk_no = swap_slot * per_disk_cnt;
+	// 페이지가 스왑 영역에 존재하지 않는 경우
+	if (swap_index == -1)
+	{
+		memset(kva, 0, PGSIZE);
+		return false;
+	}
 
-	/* 한 페이지는 8개의 디스크 sector에서 읽어야 한다*/
+	/* 해당 슬롯의 디스크 번호를 반환 */
+	disk_sector_t sector_no = swap_index * per_disk_cnt;
+
+	/* 한 페이지는 8개의 디스크 sector에서 읽어야 한다 */
 	for (int i = 0; i < per_disk_cnt; i++)
 	{
-		/* 어느 스왑 디스크에서 읽을 것인지,  디스크의 위치, 올릴 물리 메모리의 주소 */
-		disk_read(swap_disk, disk_no + i, kva + DISK_SECTOR_SIZE * i);
+		/* 어느 스왑 디스크에서 읽을 것인지, 디스크의 위치, 올릴 물리 메모리의 주소 */
+		disk_read(swap_disk, sector_no + i, kva + DISK_SECTOR_SIZE * i);
 	}
-	/* 해당 페이지는 물리 메모리에 올렸으므로 -1로 설정*/
+
+	/* 디스크의 해당 슬롯 사용 가능 상태로 */
+	bitmap_set(swap_table, swap_index, false);
+	/* 해당 페이지는 물리 메모리에 올렸으므로 -1로 설정 */
 	anon_page->swap_slot = -1;
-	/* 디스크의 해당 슬롯 사용 가능 상태로*/
-	bitmap_set(swap_disk, swap_slot, false);
 	return true;
 }
 
-/* 물리 메모리에 있는 내용을 디스크로 내린다*/
+/* 물리 메모리에 있는 내용을 디스크로 내린다 */
 static bool
 anon_swap_out(struct page *page)
 {
 	struct anon_page *anon_page = &page->anon;
-	/* false인 slot을 찾아서 true로 변환한다*/
-	size_t swap_slot = bitmap_scan_and_flip(swap_disk, 0, 1, false);
+	/* false인 slot을 찾아서 true로 변환한다 */
+	size_t swap_slot = bitmap_scan_and_flip(swap_table, 0, 1, false);
 
-	if (swap_slot = BITMAP_ERROR)
+	if (swap_slot == BITMAP_ERROR)
 	{
 		return false;
 	}
 
-	/* 해당 slot 번호를 저장한다 1개의 slot이 한 page와 관련이 있다*/
+	/* 해당 slot 번호를 저장한다 1개의 slot이 한 page와 관련이 있다 */
 	anon_page->swap_slot = swap_slot;
-	/* 한 disk는 8개의 slot과 관련이 있다. -> disk_sector_no를 알아내야 한다*/
-	disk_sector_t disk_no = swap_slot * per_disk_cnt;
+	/* 한 disk는 8개의 slot과 관련이 있다. -> disk_sector_no를 알아내야 한다 */
+	disk_sector_t sector_no = swap_slot * per_disk_cnt;
 
 	for (int i = 0; i < per_disk_cnt; i++)
 	{
-		/* 디스크에 쓸 장치, 디스크의 어느 위치에 데이터를 쓸 것인지, 메모리에서 데이터를 읽어올 시작 주소*/
-		disk_write(swap_disk, disk_no * per_disk_cnt + i, page->frame->kva + DISK_SECTOR_SIZE * i);
+		/* 디스크에 쓸 장치, 디스크의 어느 위치에 데이터를 쓸 것인지, 메모리에서 데이터를 읽어올 시작 주소 */
+		disk_write(swap_disk, sector_no + i, page->frame->kva + DISK_SECTOR_SIZE * i);
 	}
+
+	/* not present bit로 변경 */
 	pml4_clear_page(thread_current()->pml4, page->va);
-	palloc_free_page(page->frame->kva);
+	list_remove(&page->frame->frame_elem);
 	page->frame = NULL;
 
 	return true;
@@ -105,14 +113,23 @@ anon_destroy(struct page *page)
 	struct anon_page *anon_page = &page->anon;
 
 	uint64_t pml4 = thread_current()->pml4;
-	pml4_clear_page(pml4, page->va);
 
-	// frame 제거
-	if (page->frame != NULL)
+	/* 해당 가상 페이지가 연결된 물리 프레임이 없다면 */
+	if (pml4_get_page(pml4, page->va) == NULL)
 	{
-		lock_acquire(&vm_lock);
-		palloc_free_page(page->frame->kva);
-		list_remove(&page->frame->frame_elem);
-		lock_release(&vm_lock);
+		return;
+	}
+	/* 해당 페이지 not present로 변경 */
+	pml4_clear_page(pml4, page->va);
+	/* 물리 메모리 할당 해제 */
+	palloc_free_page(page->frame->kva);
+	/* 물리 메모리 관리 list에서 제거 */
+	list_remove(&page->frame->frame_elem);
+
+	/* swap slot에 있을 때 */
+	if (anon_page->swap_slot != -1)
+	{
+		/* swap slot 사용 가능함으로 바꿈 */
+		bitmap_set(swap_table, anon_page->swap_slot, false);
 	}
 }

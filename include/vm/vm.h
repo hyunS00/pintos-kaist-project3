@@ -79,6 +79,7 @@ struct frame
 };
 
 struct list frame_table;
+struct list_elem *clock_hand;
 
 /* The function table for page operations.
  * This is one way of implementing "interface" in C.

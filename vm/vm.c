@@ -30,6 +30,8 @@ void vm_init(void)
 	/* init frame_table */
 	list_init(&frame_table);
 	lock_init(&vm_lock);
+
+	clock_hand = NULL;
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -180,8 +182,61 @@ static struct frame *
 vm_get_victim(void)
 {
 	struct frame *victim = NULL;
-	/* TODO: The policy for eviction is up to you. */
+	struct list_elem *fe;
+	struct frame *f;
 
+	lock_acquire(&vm_lock);
+
+	if (clock_hand == NULL)
+	{
+		clock_hand = list_begin(&frame_table);
+	}
+
+	/* 첫번째 for문 : lru clock부터 리스트 끝까지 돌기*/
+	for (fe = clock_hand; fe != list_tail(&frame_table); fe = list_next(fe))
+	{
+		f = list_entry(fe, struct frame, frame_elem);
+		if (!pml4_is_accessed(thread_current()->pml4, f->page->va))
+		{
+			victim = f;
+			clock_hand = list_remove(fe);
+			if (clock_hand == list_tail(&frame_table))
+			{
+				clock_hand = list_begin(&clock_hand);
+			}
+			goto done;
+		}
+		else
+		{
+			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
+		}
+	}
+
+	/* 두번째 for 문 : 처음부터 lru clock까지 돌기 */
+	for (fe = list_begin(&frame_table); fe != list_next(clock_hand); fe = list_next(fe))
+	{
+		f = list_entry(fe, struct frame, frame_elem);
+		if (!pml4_is_accessed(thread_current()->pml4, f->page->va))
+		{
+			victim = f;
+			clock_hand = list_remove(fe);
+			if (clock_hand == list_tail(&frame_table))
+			{
+
+				clock_hand = list_begin(&clock_hand);
+			}
+			goto done;
+		}
+		else
+		{
+			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
+		}
+	}
+
+	goto done;
+
+done:
+	lock_release(&vm_lock);
 	return victim;
 }
 
@@ -190,38 +245,70 @@ vm_get_victim(void)
 static struct frame *
 vm_evict_frame(void)
 {
-	struct frame *victim UNUSED = vm_get_victim();
-	/* TODO: swap out the victim and return the evicted frame. */
-	/* 여기서 swap out 구현 */
-	return NULL;
+	struct frame *victim = NULL;
+	while (victim == NULL)
+	{
+		victim = vm_get_victim();
+		if (victim == NULL)
+			return NULL;
+		if (swap_out(victim->page) == false)
+		{
+			// swap_out 실패 시 다른 희생자 선택
+			victim = NULL;
+		}
+	}
+	return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
  * and return it. This always return valid address. That is, if the user pool
  * memory is full, this function evicts the frame to get the available memory
  * space.*/
+// static struct frame *
+// vm_get_frame(void)
+// {
+// 	/* TODO: Fill this function. */
+// 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
+// 	/* 커널이 유저 영역에 물리 메모리를 할당한다 */
+// 	frame->kva = palloc_get_page(PAL_USER);
+// 	frame->page = NULL;
+
+// 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
+// 		일단 PANIC(todo)로 둔다. */
+// 	if (frame->kva == NULL)
+// 	{
+// 		if (frame = (vm_evict_frame()) == NULL)
+// 		{
+// 			PANIC("swap out 불가능 상태");
+// 		}
+
+// 		frame->page = NULL;
+// 	}
+// 	ASSERT(frame != NULL);
+// 	ASSERT(frame->page == NULL);
+// 	/* frame table에 생성된 frame을 추가해준다. */
+// 	list_push_front(&frame_table, &frame->frame_elem);
+// 	return frame;
+// }
 static struct frame *
 vm_get_frame(void)
 {
-	lock_acquire(&vm_lock);
-	/* TODO: Fill this function. */
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
-	/* 커널이 유저 영역에 물리 메모리를 할당한다 */
+	lock_acquire(&vm_lock);
 	frame->kva = palloc_get_page(PAL_USER);
+	frame->page = NULL;
 	lock_release(&vm_lock);
 
-	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
-		일단 PANIC(todo)로 둔다. */
 	if (frame->kva == NULL)
 	{
 		/* vm_evict_frame 호출 */
-		PANIC("todo");
+		frame = vm_evict_frame();
+		frame->page = NULL;
 	}
-
 	ASSERT(frame != NULL);
-	// ASSERT (frame->page == NULL);
-	lock_acquire(&vm_lock);
+	ASSERT(frame->page == NULL);
 	/* frame table에 생성된 frame을 추가해준다. */
+	lock_acquire(&vm_lock);
 	list_push_front(&frame_table, &frame->frame_elem);
 	lock_release(&vm_lock);
 	return frame;
