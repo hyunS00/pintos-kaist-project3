@@ -236,7 +236,7 @@ int process_exec(void *f_name)
 	/* And then load the binary */
 	success = load(f_name, &_if);
 
-	sema_up(&thread_current()->sema_load);
+	// sema_up(&thread_current()->sema_load);
 
 	/* If load failed, quit. */
 	palloc_free_page(f_name);
@@ -281,6 +281,7 @@ int process_wait(tid_t child_tid UNUSED)
 	 * XXX:       implementing the process_wait. */
 
 	struct thread *child_thread = get_child_process(child_tid);
+	int exit_code;
 
 	if (child_thread == NULL)
 		return -1;
@@ -288,13 +289,14 @@ int process_wait(tid_t child_tid UNUSED)
 	sema_down(&child_thread->sema_exit);
 
 	list_remove(&child_thread->child_elem);
+	if (child_thread->terminated)
+	{
+		exit_code = child_thread->exit_code;
+	}
 
 	sema_up(&child_thread->parent_process->sema_wait);
 
-	if (child_thread->terminated)
-		return child_thread->exit_code;
-
-	return -1;
+	return exit_code;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -748,7 +750,7 @@ install_page(void *upage, void *kpage, bool writable)
  * If you want to implement the function for only project 2, implement it on the
  * upper block. */
 
-// 물리 메모리에 올린다																		
+// 물리 메모리에 올린다
 static bool
 lazy_load_segment(struct page *page, void *aux)
 {
@@ -799,7 +801,8 @@ lazy_load_segment(struct page *page, void *aux)
  * user process if WRITABLE is true, read-only otherwise.
  *
  * Return true if successful, false if a memory allocation error
- * or disk read error occurs. */ // 가상 주소를 할당해준다
+ * or disk read error occurs. */
+// 가상 주소를 할당해준다
 static bool
 load_segment(struct file *file, off_t ofs, uint8_t *upage,
 			 uint32_t read_bytes, uint32_t zero_bytes, bool writable)

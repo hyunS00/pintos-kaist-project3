@@ -98,6 +98,7 @@ bool vm_alloc_page_with_initializer(enum vm_type type, void *upage, bool writabl
 			goto err;
 
 		/* page round down */
+
 		upage = pg_round_down(upage);
 
 		/* type에 맞게 uninit page를 생성한다. */
@@ -205,6 +206,7 @@ vm_get_frame(void)
 	lock_acquire(&vm_lock);
 	/* TODO: Fill this function. */
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
+	/* 커널이 유저 영역에 물리 메모리를 할당한다 */
 	frame->kva = palloc_get_page(PAL_USER);
 	lock_release(&vm_lock);
 
@@ -351,7 +353,7 @@ vm_do_claim_page(struct page *page)
 	/* page - frame이 매핑되어 있지 않다면 */
 	if (pml4_get_page(pml4, page->va) == NULL)
 	{
-		/* 매핑 시켜 주고 */
+		/* 물리 프레임과 가상 페이지 매핑 */
 		if (!pml4_set_page(pml4, page->va, frame->kva, page->writable))
 		{
 			/* 매핑 되지 않았다면 할당 해제 */
