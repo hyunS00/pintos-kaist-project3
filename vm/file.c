@@ -74,6 +74,7 @@ static void file_backed_destroy(struct page *page)
 {
     struct file_page *file_page = &page->file;
     lock_acquire(&vm_lock);
+
     if (page->frame != NULL) {
         if (pml4_is_dirty(thread_current()->pml4, page->va)) {
             file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
@@ -83,6 +84,7 @@ static void file_backed_destroy(struct page *page)
         pml4_clear_page(thread_current()->pml4, page->va);
         list_remove(&page->frame->frame_elem);
         palloc_free_page(page->frame->kva);
+        
 	    lock_release(&vm_lock);
     }
 }
@@ -90,7 +92,6 @@ static void file_backed_destroy(struct page *page)
 /* Do the mmap */
 void *
 do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offset) {
-		
 
 	void *start_addr = addr;
 	size_t read_bytes = file_length(file) < length ? file_length(file) : length;
@@ -104,8 +105,9 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 		
         size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
         size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
 		struct file_page *aux = malloc(sizeof(struct file_page));
-		if (aux == NULL)                                        
+		if (aux == NULL)
 			return NULL;
 
 		aux->file = file_reopen(file);
@@ -119,6 +121,7 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 			free(aux);                                        
 			return NULL;
 		}
+
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         addr += PGSIZE;
@@ -139,7 +142,7 @@ do_munmap (void *addr) {
     }
     int total_page = page->file.total_page;
     
-    /* 매핑된 페이지들을 찾아 제거합니다. */
+    /* 매핑된 페이지들을 찾아 제거 */
     for (int i = 0; i < total_page; i++) {
        
         if(page != NULL){

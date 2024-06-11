@@ -1,5 +1,4 @@
 #include "userprog/syscall.h"
-// #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -12,9 +11,7 @@
 #include "filesys/file.h"
 #include "threads/palloc.h"
 #include <string.h>
-
 #include "userprog/process.h"
-// #include "string.h"
 
 void syscall_entry(void);
 void syscall_handler(struct intr_frame *);
@@ -56,8 +53,6 @@ bool address_check(void *pointer)
 /* The main system call interface */
 void syscall_handler(struct intr_frame *f UNUSED)
 {
-	// TODO: Your implementation goes here.
-	// printf ("system call!\n");
 	uint64_t arg1 = f->R.rdi;
 	uint64_t arg2 = f->R.rsi;
 	uint64_t arg3 = f->R.rdx;
@@ -194,6 +189,7 @@ int write(int fd, const void *buffer, unsigned length)
 		param = fd_to_file(fd);
 		if (param == NULL)
 			return -1;
+
 		lock_acquire(&filesys_lock);
 		str_cnt = file_write(param, buffer, length);
 		lock_release(&filesys_lock);
@@ -305,12 +301,14 @@ void close(int fd)
 {
 	if (fd < 0 || fd >= MAX_FDT)
 		exit(-1);
+		
 	struct file *param = fd_to_file(fd);
 	if (param == NULL)
 		exit(-1);
 	
 	thread_current()->fdt[fd] = NULL;
 	thread_current()->nex_fd = fd;
+
 	lock_acquire(&filesys_lock);
 	file_close(param);
 	lock_release(&filesys_lock);

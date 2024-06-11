@@ -30,7 +30,6 @@ void vm_init(void)
 
 	/* init frame_table */
 	list_init(&frame_table);
-
 	lock_init(&vm_lock);
 }
 
@@ -137,8 +136,6 @@ spt_find_page(struct supplemental_page_table *spt UNUSED, void *va UNUSED)
 	struct page p;
 	struct hash_elem *e;
 
-	/* TODO: Fill this function. */
-
 	/* va가 page의 시작점을 가리키고 있지 않을 수 있으므로
 		round_down을 통해 page 시작점의 주소를 구한다. */
 	p.va = pg_round_down(va);
@@ -156,7 +153,6 @@ bool spt_insert_page(struct supplemental_page_table *spt UNUSED,
 					 struct page *page UNUSED)
 {
 	bool succ = false;
-	/* TODO: Fill this function. */
 
 	/* insert에 성공하면 e == NULL이 된다.(hash_insert에 의해) */
 	if (!hash_insert(&spt->spt_hash, &page->hash_elem))
@@ -200,8 +196,8 @@ vm_evict_frame(void)
 static struct frame *
 vm_get_frame(void)
 {
-	/* TODO: Fill this function. */
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
+
 	lock_acquire(&vm_lock);
 	frame->kva = palloc_get_page(PAL_USER);
 	lock_release(&vm_lock);
@@ -215,7 +211,6 @@ vm_get_frame(void)
 	}
 
 	ASSERT(frame != NULL);
-	// ASSERT (frame->page == NULL);
 
 	/* frame table에 생성된 frame을 추가해준다. */
 	lock_acquire(&vm_lock);
@@ -261,10 +256,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
 	uintptr_t rsp ;
 
-	/* TODO: Validate the fault */
-	/* TODO: Your code goes here */
 	/* 1. 커널 주소에대한 접근인지 확인한다 */
-	// printf("addr:0x%x user:%d write:%d not_present:%d\n",addr,user,write,not_present);
 	if(is_kernel_vaddr(addr))
 		exit(-1);
 
@@ -290,20 +282,14 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 
 	if(write && !page->writable)
 		exit(-1);
+
 	if (not_present)
 	{
 		/* 해당 가상 주소에 대한 페이지는 메모리에 존재하지만, r/o 페이지에 write 시도*/
 		return vm_do_claim_page(page);
 	}
 
-	/* 2. Bogus fault인지 확인한다. */
-	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
-			swap-out된 페이지에 대한 PF이다. */
-	// if (page->operations->type != VM_UNINIT || page != NULL)
-	// {
-	// 	if (vm_do_claim_page(page))
-	// 		return true;
-	// }
+	/* 해당 내용 출력 시 try_handle_fault에서 예외처리 되지 못한 것 */
 	printf("handle fault\n");
 	return false;
 }
@@ -319,8 +305,6 @@ void vm_dealloc_page(struct page *page)
 /* Claim the page that allocate on VA. */
 bool vm_claim_page(void *va UNUSED)
 {
-	/* TODO: Fill this function */
-
 	struct thread *curr = thread_current();
 
 	va = pg_round_down(va);
@@ -344,9 +328,10 @@ vm_do_claim_page(struct page *page)
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
-	/* TODO: Insert page table entry to map page's VA to frame's PA. */
+	
 	struct thread *t = thread_current();
 	void *pml4 = t->pml4;
+
 	/* page - frame이 매핑되어 있지 않다면 */
 	if (pml4_get_page(pml4, page->va) == NULL)
 	{
@@ -427,13 +412,15 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             		vm_dealloc_page(dst_page);
 				}
 				dst_page = spt_find_page(&thread_current()->spt, upage);
+
+				lock_acquire(&vm_lock);
 				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+				lock_release(&vm_lock);
 				break;
 			}
 			/* UNINIT 상태가 아니라면 물리 프레임에 매핑하는 작업까지 수행한다. */
 			/* aux가 필요하지 않은 이유?
 				- aux는 lazy loading을 위해 */
-			/* TODO: VM_FILE, VM_ANON에 대해 구분이 필요하다면 추가해주어야 한다. */
 			default:
 			{
 				if (!vm_alloc_page(type, upage, writable) || !vm_claim_page(upage)) {
@@ -444,21 +431,20 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 				if (dst_page == NULL) {
 					return false;
 				}
-				
+
+				lock_acquire(&vm_lock);
 				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+				lock_release(&vm_lock);
 			}
 
 		}
 	}
-
 	return true;
 }
 
 /* Free the resource hold by the supplemental page table */
 void supplemental_page_table_kill(struct supplemental_page_table *spt UNUSED)
 {
-	/* TODO: Destroy all the supplemental_page_table hold by thread and -> 이거까지는 구현 완
-	 * TODO: writeback all the modified contents to the storage. -> 나중에 구현해야함 */
 	/* 1. hash_destroy에서 buckets에 달린 page와 vme를 삭제해주어야 한다. */
 	/* bucket에 대한 해제는 hash_destroy에서,
 		page와 vme에 대한 해제는 hash_free_func에서 수행한다. */
