@@ -56,16 +56,18 @@ anon_destroy (struct page *page) {
 	/* spt table에서 destroy할 페이지를 삭제한다. */
 	// spt_remove_page(&curr->spt, page);
 
-	lock_acquire(&vm_lock);
 	if (pml4_get_page(curr->pml4, page->va) != NULL) {
 		/* frame_table에서 페이지에 매핑된 프레임을 삭제한다. */
+		lock_acquire(&vm_lock);
 		list_remove(&page->frame->frame_elem);
+		lock_release(&vm_lock);
 
 		/* 페이지 - 프레임 사이 매핑을 해제한다. */
 		pml4_clear_page(curr->pml4, page->va);
-		palloc_free_page(page->frame->kva);
+		if (page->frame->kva != NULL) {
+			palloc_free_page(page->frame->kva);
+		}
 	}
-	lock_release(&vm_lock);
 
 
 	/* 페이지에 매핑된 프레임이 할당되어 있다면 해제한다. */

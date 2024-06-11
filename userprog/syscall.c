@@ -203,6 +203,7 @@ int write(int fd, const void *buffer, unsigned length)
 		param = fd_to_file(fd);
 		if (param == NULL)
 			return -1;
+
 		lock_acquire(&filesys_lock);
 		str_cnt = file_write(param, buffer, length);
 		lock_release(&filesys_lock);
@@ -384,8 +385,8 @@ void
 	if (fd < 2)
 		return NULL;
 	/* for. mmap-kernel */
-	// if (is_kernel_vaddr(addr + length - 1))
-	// 	return NULL;
+	if (is_kernel_vaddr(addr + length - 1))
+		return NULL;
 	
 	struct file *file = fd_to_file(fd);
 	if (file == NULL)
