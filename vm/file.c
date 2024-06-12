@@ -38,6 +38,7 @@ static void file_backed_destroy(struct page *page)
 	{
 		list_remove(&page->frame->frame_elem);
 	}
+
 	pml4_clear_page(pml4, page->va);
 	lock_release(&vm_lock);
 	file_close(file_page->file);
@@ -107,7 +108,6 @@ file_backed_swap_in(struct page *page, void *kva)
 static bool
 file_backed_swap_out(struct page *page)
 {
-	// printf("page out va:0x%x\n",page->va);
 	uint64_t pml4 = thread_current()->pml4;
 	struct file_page *file_page = &page->file;
 	lock_acquire(&vm_lock);
@@ -116,9 +116,10 @@ file_backed_swap_out(struct page *page)
 		file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
 		pml4_set_dirty(pml4, page->va, false);
 	}
+	list_remove(&page->frame->frame_elem);
 	pml4_clear_page(pml4, page->va);
 	lock_release(&vm_lock);
-	page->frame = NULL;
+	page->frame = NULL; 
 	return true;
 }
 
@@ -140,13 +141,10 @@ do_mmap(void *addr, size_t length, int writable,
 	{
 		total_page_count = length / PGSIZE;
 	}
-
 	else
 	{
 		total_page_count = (length / PGSIZE) + 1;
 	}
-
-	// struct file *reopen_file = file_reopen(file);
 
 	while (read_bytes > 0 || zero_bytes > 0)
 	{
@@ -194,6 +192,7 @@ void do_munmap(void *addr)
 	struct supplemental_page_table *spt = &thread_current()->spt;
 
 	addr = pg_round_down(addr);
+
 	struct page *page = spt_find_page(spt, addr);
 	if (page == NULL)
 	{
@@ -201,7 +200,6 @@ void do_munmap(void *addr)
 	}
 
 	int total_page = page->file.total_page;
-
 	for (int i = 0; i < total_page; i++)
 	{
 		if (page == NULL)
@@ -210,12 +208,6 @@ void do_munmap(void *addr)
 		}
 
 		struct file_page *target_file_page = &page->file;
-
-		/* 파일에 수정이 일어났으면 파일을 수정하기 위함*/
-		// if (pml4_is_dirty(thread_current()->pml4, page->va))
-		// {
-		// 	file_write_at(target_file_page->file, addr, target_file_page->read_bytes, target_file_page->offset);
-		// }
 
 		file_backed_destroy(page);
 		hash_delete(spt, &page->hash_elem);

@@ -238,10 +238,10 @@ static struct frame *
 vm_get_frame(void)
 {
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
-	// lock_acquire(&vm_lock);
+	lock_acquire(&vm_lock);
 	frame->kva = palloc_get_page(PAL_USER);
 	frame->page = NULL;
-	// lock_release(&vm_lock);
+	lock_release(&vm_lock);
 
 	if (frame->kva == NULL)
 	{
@@ -293,8 +293,6 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 	/* 1. 커널 주소에대한 접근인지 확인한다 */
-
-	// printf("==================================================> handle\n");
 	if (is_kernel_vaddr(addr))
 		exit(-1);
 
@@ -490,13 +488,11 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 			{
 				return false;
 			}
-
 			struct page *dst_page = spt_find_page(dst, src_page->va);
 			if (dst_page == NULL)
 			{
 				return false;
 			}
-
 			memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
 		}
 		}
