@@ -27,7 +27,7 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
 {
     struct file_page *aux = (struct file_page *)page->uninit.aux;
 	memcpy(&page->file, aux, sizeof(struct file_page));
-
+    // printf("page init va:0x%x\n",page->va);
     struct file_page *file_page = &page->file;
     struct file *file = file_page->file;
 
@@ -43,13 +43,16 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
     // Set up the page operations for file-backed pages
     page->operations = &file_ops;
 
+    lock_acquire(&vm_lock);
     // Read file data into the page
-    if (file_read_at(file, kva, page_read_bytes, offset) != (int)page_read_bytes)
+    if (file_read_at(file, kva, page_read_bytes, offset) != (int)page_read_bytes){
+        lock_release(&vm_lock);
         return false;
+    }
 
     // Clear the remaining bytes
     memset(kva + page_read_bytes, 0, page_zero_bytes);
-
+    lock_release(&vm_lock);
     // Free the allocated memory for file_page
     free(aux);
 
@@ -60,12 +63,45 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
 static bool
 file_backed_swap_in (struct page *page, void *kva) {
 	struct file_page *file_page UNUSED = &page->file;
+    
+    struct file *file = file_page->file;
+    size_t offset = file_page->offset;
+    size_t read_bytes = file_page->read_bytes;
+    size_t zero_bytes = file_page->zero_bytes;
+	
+    file_seek(file, offset);
+
+    size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+	size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+    lock_acquire(&vm_lock);
+	if (file_read(file, kva, page_read_bytes) != (int)page_read_bytes)
+		return false;
+
+	memset(kva + page_read_bytes, 0, page_zero_bytes);
+	lock_release(&vm_lock);
+
+    return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool
 file_backed_swap_out (struct page *page) {
-	struct file_page *file_page UNUSED = &page->file;
+    // printf("page out va:0x%x\n",page->va);
+    uint64_t pml4 = thread_current()->pml4;
+    struct file_page *file_page = &page->file;
+
+    lock_acquire(&vm_lock);
+    if (pml4_is_dirty(pml4, page->va)) {
+        file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
+		pml4_set_dirty(pml4, page->va, false);
+    }
+	pml4_clear_page(pml4, page->va);
+
+    lock_release(&vm_lock);
+    page->frame->frame_holder = NULL;
+    page->frame = NULL;
+    return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
@@ -74,16 +110,21 @@ static void file_backed_destroy(struct page *page)
 	uint64_t pml4 = thread_current()->pml4;
     struct file_page *file_page = &page->file;
     lock_acquire(&vm_lock);
-    if (pml4_is_dirty(pml4, page->va)) {
-        file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
-		pml4_set_dirty(pml4, page->va, false);
+
+    if(page->frame != NULL){
+        if (pml4_is_dirty(pml4, page->va)) {
+            file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
+		    pml4_set_dirty(pml4, page->va, false);
+        }
+        list_remove(&page->frame->frame_elem); // 프레임 리스트에서 프레임 제거
+        palloc_free_page(page->frame->kva);
     }
-    file_close(file_page->file);
+    
+    pml4_set_accessed(pml4, page->va, false);
 	pml4_clear_page(pml4, page->va);
-	list_remove(&page->frame->frame_elem); // 프레임 리스트에서 프레임 제거
-	palloc_free_page(page->frame->kva);
     lock_release(&vm_lock);
-    // printf("page:0x%x read_bytes:%d\n",page->va,file_page->read_bytes);
+	
+    file_close(file_page->file);
 }
 
 /* Do the mmap */
@@ -115,14 +156,11 @@ do_mmap (void *addr, size_t length, int writable,
 		aux->read_bytes = page_read_bytes;
 		aux->zero_bytes = page_zero_bytes;
         aux->total_page = total_page_count;
-        lock_acquire(&vm_lock);
 		if (!vm_alloc_page_with_initializer(VM_FILE, addr, writable, NULL, aux))
 		{
 			free(aux);
-            lock_release(&vm_lock);
 			return NULL;
 		}
-        lock_release(&vm_lock);
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         addr += PGSIZE;

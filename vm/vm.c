@@ -1,5 +1,3 @@
-/* vm.c: Generic interface for virtual memory objects. */
-
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
@@ -28,6 +26,7 @@ void vm_init(void)
 
 	/* init frame_table */
 	list_init(&frame_table);
+	clock_hand = NULL;
 	lock_init(&vm_lock);
 }
 
@@ -171,12 +170,35 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 
 /* Get the struct frame, that will be evicted. */
 static struct frame *
-vm_get_victim(void)
-{
-	struct frame *victim = NULL;
-	/* TODO: The policy for eviction is up to you. */
-
-	return victim;
+vm_get_victim(void) {
+    struct frame *victim = NULL;
+    struct thread *curr = thread_current();
+    struct list_elem *e;
+    /* clock hand가 이상한 곳을 가리키지 않도록 */
+    if (clock_hand == NULL || clock_hand == list_end(&frame_table)) {
+        clock_hand = list_begin(&frame_table);
+    }
+    /* clock_hand가 공유자원이므로 lock을 걸어주어야 한다. */
+    lock_acquire(&vm_lock);
+    /* 1. access == 0인걸 찾는다. */
+    for (e = clock_hand; e != list_end(&frame_table); e = list_next(e)) {
+        struct frame *f = list_entry(clock_hand, struct frame, frame_elem);
+        if (!pml4_is_accessed(f->frame_holder->pml4, f->page->va)) {
+            victim = f;
+            clock_hand = list_next(clock_hand);
+            lock_release(&vm_lock);
+            // printf("get victim1: 0x%x\n", victim->kva);
+            return victim;
+        }
+        /* 참조 비트를 0으로 설정한다. */
+        pml4_set_accessed(f->frame_holder->pml4, f->page->va, false);
+    }
+    /* 2. 그래도 없으면 첫 frame */
+    victim = list_entry(list_begin(&frame_table), struct frame, frame_elem);
+    clock_hand = list_next(list_begin(&frame_table));
+    lock_release(&vm_lock);
+    // printf("get victim2: 0x%x\n", victim->kva);
+    return victim;
 }
 
 /* Evict one page and return the corresponding frame.
@@ -184,10 +206,20 @@ vm_get_victim(void)
 static struct frame *
 vm_evict_frame(void)
 {
-	struct frame *victim UNUSED = vm_get_victim();
-	/* TODO: swap out the victim and return the evicted frame. */
-	/* 여기서 swap out 구현 */
-	return NULL;
+    struct frame *victim = NULL;
+
+	victim = vm_get_victim();
+	if (victim == NULL)
+		return NULL;
+	if (swap_out(victim->page) == false) {
+		// swap_out 실패 시 다른 희생자 선택
+		victim = NULL;
+	}
+	lock_acquire(&vm_lock);
+	list_remove(&victim->frame_elem); // 프레임 리스트에서 프레임 제거
+	lock_release(&vm_lock);
+
+    return victim;
 }
 
 /* palloc() and get frame. If there is no available page, evict the page
@@ -202,6 +234,7 @@ vm_get_frame(void)
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
 	lock_acquire(&vm_lock);
 	frame->kva = palloc_get_page(PAL_USER);
+	frame->page = NULL;
 	lock_release(&vm_lock);
 
 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
@@ -209,11 +242,13 @@ vm_get_frame(void)
 	if (frame->kva == NULL)
 	{
 		/* vm_evict_frame 호출 */
-		PANIC("todo");
+		frame = vm_evict_frame();
+		frame->page = NULL;
+		// printf("frame->kva:0x%x\n",frame->kva);
 	}
-
+	frame->frame_holder = thread_current();
 	ASSERT(frame != NULL);
-	// ASSERT (frame->page == NULL);
+	ASSERT (frame->page == NULL);
 
 	lock_acquire(&vm_lock);
 	/* frame table에 생성된 frame을 추가해준다. */
@@ -282,8 +317,9 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	addr = pg_round_down(addr);
 	struct page *page = spt_find_page(spt, addr);
 	/* 해당 가상 주소에 대한 페이지가 메모리에 없는 상태*/
-	if (page == NULL)
+	if (page == NULL){
 		exit(-1);
+	}
 
 	if(write && !page->writable)
 		exit(-1);
@@ -296,11 +332,11 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* 2. Bogus fault인지 확인한다. */
 	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
 			swap-out된 페이지에 대한 PF이다. */
-	// if (page->operations->type != VM_UNINIT || page != NULL)
-	// {
-	// 	if (vm_do_claim_page(page))
-	// 		return true;
-	// }
+	if (page->operations->type != VM_UNINIT || page != NULL)
+	{
+		if (vm_do_claim_page(page))
+			return true;
+	}
 	printf("handle fault\n");
 	return false;
 }
@@ -373,79 +409,78 @@ void supplemental_page_table_init(struct supplemental_page_table *spt UNUSED)
 	uninit 페이지를 할당하고 즉시 claim해야 함
 */
 bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
-								  struct supplemental_page_table *src UNUSED)
+                                  struct supplemental_page_table *src UNUSED)
 {
-	struct hash_iterator i;
-	hash_first(&i, &src->spt_hash);
-	while (hash_next(&i))
-	{
-		struct page *src_page = hash_entry(hash_cur(&i), struct page, hash_elem);
-
-		/* struct page의 field */
-		enum vm_type type = page_get_type(src_page);
-		void *upage = src_page->va;
-		bool writable = src_page->writable;
-		vm_initializer *init = src_page->uninit.init;
-		void *aux = src_page->uninit.aux;
-
-		switch (src_page->operations->type) {
-			/* 부모 페이지의 필드들을 갖고와 같은 설정으로 자식 페이지를 할당한다. */
-			/* 사실상 UNINIT 페이지는 존재하지 않는다? */
-			case VM_UNINIT:
-				{
-					if(aux != NULL) {
-						struct file_page *new_aux = (struct file_page *) malloc(sizeof(struct file_page));
-						memcpy(new_aux, aux, sizeof(struct file_page));
-						aux = new_aux;
-					}
-					if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
-						return false;
-				
-					break;
-				}
-			case VM_FILE:
-			/* 2) type이 file이면 */
-			{
-				struct page *dst_page;
-				struct file_page *file_page = malloc(sizeof(struct file_page));
-				struct file_page *src_file = &src_page->file;
-				file_page->file = file_reopen(src_file->file);
-				file_page->is_segment = src_file->is_segment;
-				file_page->offset = src_file->offset;
-				file_page->read_bytes = src_file->read_bytes;
-				file_page->total_page = src_file->total_page;
-				file_page->zero_bytes = src_file ->zero_bytes;
-
-				if (vm_alloc_page_with_initializer(VM_FILE, upage, src_page->writable, NULL, file_page) && !vm_claim_page(upage)) {
-					printf("Page claim failed at 0x%X\n", upage);
-					dst_page = spt_find_page(&thread_current()->spt, upage);
-            		vm_dealloc_page(dst_page);
-				}
-				dst_page = spt_find_page(&thread_current()->spt, upage);
-				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
-				break;
-			}
-			/* UNINIT 상태가 아니라면 물리 프레임에 매핑하는 작업까지 수행한다. */
-			/* aux가 필요하지 않은 이유?
-				- aux는 lazy loading을 위해 */
-			/* TODO: VM_FILE, VM_ANON에 대해 구분이 필요하다면 추가해주어야 한다. */
-			default:
-			{
-				if (!vm_alloc_page(type, upage, writable) || !vm_claim_page(upage)) {
-					return false;
-				}
-				
-				struct page *dst_page = spt_find_page(dst, src_page->va);
-				if (dst_page == NULL) {
-					return false;
-				}
-				
-				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
-			}
-
-		}
-	}
-	return true;
+    struct hash_iterator i;
+    hash_first(&i, &src->spt_hash);
+    while (hash_next(&i))
+    {
+        struct page *src_page = hash_entry(hash_cur(&i), struct page, hash_elem);
+        /* struct page의 field */
+        enum vm_type type = page_get_type(src_page);
+        void *upage = src_page->va;
+        bool writable = src_page->writable;
+        vm_initializer *init = src_page->uninit.init;
+        void *aux = src_page->uninit.aux;
+        switch (src_page->operations->type) {
+            /* 부모 페이지의 필드들을 갖고와 같은 설정으로 자식 페이지를 할당한다. */
+            /* 사실상 UNINIT 페이지는 존재하지 않는다? */
+            case VM_UNINIT:
+                {
+                    if(aux != NULL) {
+                        struct file_page *new_aux = (struct file_page *) malloc(sizeof(struct file_page));
+                        memcpy(new_aux, aux, sizeof(struct file_page));
+                        aux = new_aux;
+                    }
+                    if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
+                        return false;
+                
+                    break;
+                }
+            case VM_FILE:
+            /* 2) type이 file이면 */
+            {
+                struct page *dst_page;
+                struct file_page *file_page = malloc(sizeof(struct file_page));
+                if (file_page == NULL)
+                    return false;
+                struct file_page *src_file = &src_page->file;
+                file_page->file = file_reopen(src_file->file);
+                file_page->is_segment = src_file->is_segment;
+                file_page->offset = src_file->offset;
+                file_page->read_bytes = src_file->read_bytes;
+                file_page->total_page = src_file->total_page;
+                file_page->zero_bytes = src_file ->zero_bytes;
+                if (vm_alloc_page_with_initializer(VM_FILE, upage, src_page->writable, NULL, file_page) && !vm_claim_page(upage)) {
+                    dst_page = spt_find_page(&thread_current()->spt, upage);
+                    vm_dealloc_page(dst_page);
+                }
+                dst_page = spt_find_page(&thread_current()->spt, upage);
+                lock_acquire(&vm_lock);
+                memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+                lock_release(&vm_lock);
+                break;
+            }
+            /* UNINIT 상태가 아니라면 물리 프레임에 매핑하는 작업까지 수행한다. */
+            /* aux가 필요하지 않은 이유?
+                - aux는 lazy loading을 위해 */
+            default:
+            {
+                if (!vm_alloc_page(type, upage, writable) || !vm_claim_page(upage)) {
+                    return false;
+                }
+                
+                struct page *dst_page = spt_find_page(dst, src_page->va);
+                if (dst_page == NULL) {
+                    return false;
+                }
+                lock_acquire(&vm_lock);
+                memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+                lock_release(&vm_lock);
+            }
+        }
+    }
+    return true;
 }
 
 /* Free the resource hold by the supplemental page table */

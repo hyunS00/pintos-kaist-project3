@@ -72,9 +72,11 @@ struct frame {
 
 	/* frame table에 접근하기 위해 */
 	struct list_elem frame_elem;
+	struct thread *frame_holder;
 };
 
 struct list frame_table;
+struct list_elem *clock_hand;
 
 /* The function table for page operations.
  * This is one way of implementing "interface" in C.

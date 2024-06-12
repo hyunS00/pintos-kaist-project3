@@ -45,7 +45,8 @@ test_main (void)
         if ((i & 0x1ff) == 0)
             msg ("check consistency in page %zu", i);
     }
-
+    // msg("actual: %ld",strlen(actual));
+    // msg("map: %ld",strlen (large));
     /* Check file map'd page again */
     if (memcmp (actual, large, strlen (large)))
         fail ("read of mmap'd file reported bad data");

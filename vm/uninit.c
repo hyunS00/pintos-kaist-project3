@@ -10,6 +10,7 @@
 
 #include "vm/vm.h"
 #include "vm/uninit.h"
+#include "threads/palloc.h"
 
 static bool uninit_initialize (struct page *page, void *kva);
 static void uninit_destroy (struct page *page);
@@ -65,4 +66,5 @@ uninit_destroy (struct page *page) {
 	 * TODO: If you don't have anything to do, just return. */
 	if(uninit->aux != NULL)
 		free(uninit->aux);
+	pml4_clear_page(thread_current()->pml4, page->va); // 페이지 테이블 매핑 끊기
 }

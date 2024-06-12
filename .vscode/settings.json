@@ -31,6 +31,9 @@
     "directory.h": "c",
     "stdlib.h": "c",
     "intr-stubs.h": "c",
-    "inspect.h": "c"
+    "inspect.h": "c",
+    "bitmap.h": "c",
+    "uninit.h": "c",
+    "hash.h": "c"
   }
 }

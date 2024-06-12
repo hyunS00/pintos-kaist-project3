@@ -236,7 +236,7 @@ int process_exec(void *f_name)
 	/* And then load the binary */
 	success = load(f_name, &_if);
 
-	sema_up(&thread_current()->sema_load);
+	// sema_up(&thread_current()->sema_load);
 
 	/* If load failed, quit. */
 	palloc_free_page(f_name);
@@ -776,11 +776,16 @@ lazy_load_segment(struct page *page, void *aux)
 	if (kva == NULL)
 		return false;
 	
+	lock_acquire(&vm_lock);
 	/* 읽기 실패 */
 	if (file_read(file, kva, page_read_bytes) != (int)page_read_bytes)
 		return false;
-
+	
 	memset(kva + page_read_bytes, 0, page_zero_bytes);
+	lock_release(&vm_lock);
+
+	free(aux);
+
 	return true;
 }
 
@@ -825,7 +830,7 @@ load_segment(struct file *file, off_t ofs, uint8_t *upage,
 		aux->offset = ofs;
 		aux->read_bytes = read_bytes;
 		aux->zero_bytes = zero_bytes;
-		aux->is_segment = true;
+
 		/* 지금 실행 파일에 대해 세그먼트 설정을 해주고 있다.
 			만약 FILE 타입으로 초기화를 해주면 swap-out 되었을 때 원본 파일의 내용이 수정된다.
 			따라서 이를 막기 위해 ANON 타입으로 초기화해준다.
