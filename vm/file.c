@@ -31,25 +31,95 @@ static void file_backed_destroy(struct page *page)
 	if (pml4_is_dirty(pml4, page->va))
 	{
 		file_write_at(file_page->file, page->va, file_page->read_bytes, file_page->offset);
+		pml4_set_dirty(thread_current()->pml4, page->va, 0);
 	}
-	file_close(file_page->file);
-	list_remove(&page->frame->frame_elem);
+
+	if (page->frame != NULL)
+	{
+		list_remove(&page->frame->frame_elem);
+	}
 	pml4_clear_page(pml4, page->va);
 	lock_release(&vm_lock);
+	file_close(file_page->file);
 }
 
-/* Swap in the page by read contents from the file. */
 static bool
 file_backed_swap_in(struct page *page, void *kva)
 {
 	struct file_page *file_page UNUSED = &page->file;
-}
+	struct file *file = file_page->file;
+	off_t offset = file_page->offset;
+	int page_read_bytes = file_page->read_bytes;
+	int page_zero_bytes = file_page->zero_bytes;
 
-/* Swap out the page by writeback contents to the file. */
+	file_seek(file, offset);
+	if (file_read(file, kva, page_read_bytes) != (int)page_read_bytes)
+	{
+		return false;
+	}
+
+	memset(page->frame->kva + page_read_bytes, 0, page_zero_bytes);
+	return true;
+}
+// static bool
+// file_backed_swap_in(struct page *page, void *kva)
+// {
+// 	// printf("File-backed Swap in!\n");
+// 	struct file_page *file_page UNUSED = &page->file;
+
+// 	struct file *file = file_page->file;
+// 	size_t offset = file_page->offset;
+// 	size_t read_bytes = file_page->read_bytes;
+// 	size_t zero_bytes = file_page->zero_bytes;
+
+// 	file_seek(file, offset);
+// 	size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+// 	size_t page_zero_bytes = PGSIZE - page_read_bytes;
+// 	lock_acquire(&vm_lock);
+// 	if (file_read(file, kva, page_read_bytes) != (int)page_read_bytes)
+// 		return false;
+// 	memset(kva + page_read_bytes, 0, page_zero_bytes);
+// 	lock_release(&vm_lock);
+// 	return true;
+// }
+
+// static bool
+// file_backed_swap_out(struct page *page)
+// {
+// 	struct file_page *file_page UNUSED = &page->file;
+// 	struct file *file = file_page->file;
+
+// 	if (file == NULL)
+// 	{
+// 		return false;
+// 	}
+// 	if (pml4_is_dirty(thread_current()->pml4, page->va) == true)
+// 	{
+// 		file_write_at(file, page->frame->kva, file_page->read_bytes, file_page->offset);
+// 		pml4_set_dirty(thread_current()->pml4, page->va, 0);
+// 	}
+// 	list_remove(&page->frame->frame_elem);
+// 	// pml4_clear_page(thread_current()->pml4, page->va);
+// 	// page->frame = NULL;
+
+// 	return true;
+// }
 static bool
 file_backed_swap_out(struct page *page)
 {
-	struct file_page *file_page UNUSED = &page->file;
+	// printf("page out va:0x%x\n",page->va);
+	uint64_t pml4 = thread_current()->pml4;
+	struct file_page *file_page = &page->file;
+	lock_acquire(&vm_lock);
+	if (pml4_is_dirty(pml4, page->va))
+	{
+		file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
+		pml4_set_dirty(pml4, page->va, false);
+	}
+	pml4_clear_page(pml4, page->va);
+	lock_release(&vm_lock);
+	page->frame = NULL;
+	return true;
 }
 
 /* length : 가상 메모리에 할당하고자 하는 길이*/
@@ -142,10 +212,10 @@ void do_munmap(void *addr)
 		struct file_page *target_file_page = &page->file;
 
 		/* 파일에 수정이 일어났으면 파일을 수정하기 위함*/
-		if (pml4_is_dirty(thread_current()->pml4, page->va))
-		{
-			file_write_at(target_file_page->file, addr, target_file_page->read_bytes, target_file_page->offset);
-		}
+		// if (pml4_is_dirty(thread_current()->pml4, page->va))
+		// {
+		// 	file_write_at(target_file_page->file, addr, target_file_page->read_bytes, target_file_page->offset);
+		// }
 
 		file_backed_destroy(page);
 		hash_delete(spt, &page->hash_elem);

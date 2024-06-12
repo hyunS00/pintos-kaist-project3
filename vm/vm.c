@@ -199,44 +199,17 @@ vm_get_victim(void)
 		if (!pml4_is_accessed(thread_current()->pml4, f->page->va))
 		{
 			victim = f;
-			clock_hand = list_remove(fe);
-			if (clock_hand == list_tail(&frame_table))
-			{
-				clock_hand = list_begin(&clock_hand);
-			}
-			goto done;
+			clock_hand = list_next(clock_hand);
+			lock_release(&vm_lock);
+			return victim;
 		}
-		else
-		{
-			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
-		}
+		pml4_set_accessed(thread_current()->pml4, f->page->va, false);
 	}
-
-	/* 두번째 for 문 : 처음부터 lru clock까지 돌기 */
-	for (fe = list_begin(&frame_table); fe != list_next(clock_hand); fe = list_next(fe))
-	{
-		f = list_entry(fe, struct frame, frame_elem);
-		if (!pml4_is_accessed(thread_current()->pml4, f->page->va))
-		{
-			victim = f;
-			clock_hand = list_remove(fe);
-			if (clock_hand == list_tail(&frame_table))
-			{
-
-				clock_hand = list_begin(&clock_hand);
-			}
-			goto done;
-		}
-		else
-		{
-			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
-		}
-	}
-
-	goto done;
-
-done:
+	/* 2. 그래도 없으면 첫 frame */
+	victim = list_entry(list_begin(&frame_table), struct frame, frame_elem);
+	clock_hand = list_next(list_begin(&frame_table));
 	lock_release(&vm_lock);
+
 	return victim;
 }
 
@@ -265,10 +238,10 @@ static struct frame *
 vm_get_frame(void)
 {
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
-	lock_acquire(&vm_lock);
+	// lock_acquire(&vm_lock);
 	frame->kva = palloc_get_page(PAL_USER);
 	frame->page = NULL;
-	lock_release(&vm_lock);
+	// lock_release(&vm_lock);
 
 	if (frame->kva == NULL)
 	{
@@ -320,6 +293,8 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	/* TODO: Validate the fault */
 	/* TODO: Your code goes here */
 	/* 1. 커널 주소에대한 접근인지 확인한다 */
+
+	// printf("==================================================> handle\n");
 	if (is_kernel_vaddr(addr))
 		exit(-1);
 

@@ -67,6 +67,6 @@ uninit_destroy(struct page *page)
 	{
 		return;
 	}
-
+	pml4_clear_page(&thread_current()->pml4, page->va);
 	free(uninit->aux);
 }
