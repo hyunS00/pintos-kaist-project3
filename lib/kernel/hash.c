@@ -401,6 +401,7 @@ hash_free_func (struct hash_elem *e, void *aux) {
 	struct page *p = hash_entry(e, struct page, hash_elem);
 	
 	/* page type에 맞는 destroy function을 부른다. */
+	// spt_remove_page(&thread_current()->spt, p);
 	destroy(p);
 	free(p);
 }

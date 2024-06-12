@@ -229,7 +229,9 @@ process_exec(void *f_name) {
 	/* And then load the binary */
 	success = load(f_name, &_if);
 
-	sema_up(&thread_current()->sema_load);
+	/* load에서 filesys_lock을 하고 있기 때문에 여기서는 안해줘도 됨 
+		- load가 완료될 때까지만 lock을 걸어주면 된다. */
+	// sema_up(&thread_current()->sema_load);
 
 	/* If load failed, quit. */
 	palloc_free_page(f_name);
@@ -276,12 +278,15 @@ process_wait(tid_t child_tid UNUSED) {
 	if (child_thread == NULL)
 		return -1;
 
+	/* 자식 프로세스가 종료할 때까지 기다린다. */
 	sema_down(&child_thread->sema_exit);
+
 
 	list_remove(&child_thread->child_elem);
 
 	sema_up(&child_thread->parent_process->sema_wait);
 
+	/* 얘를 sema_up 위에 */
 	if (child_thread->terminated)
 		return child_thread->exit_code;
 
@@ -740,11 +745,12 @@ lazy_load_segment(struct page *page, void *aux) {
 		return false;
 	
 	/* 읽기 실패 */
+	lock_acquire(&vm_lock);
 	if (file_read(file, kva, page_read_bytes) != (int)page_read_bytes)
 		return false;
 
 	memset(kva + page_read_bytes, 0, page_zero_bytes);
-
+	lock_release(&vm_lock);
 	/* 자식 페이지에서 복사해줬으니까 여기서 해제 가능하다. */
 	free(aux);
 

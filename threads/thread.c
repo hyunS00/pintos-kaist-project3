@@ -337,6 +337,7 @@ thread_exit (void) {
 	list_remove(&thread_current()->adv_elem);
 	
 	thread_current()->terminated = true;
+	/* 자식이 종료되면 sema up */
 	sema_up(&thread_current()->sema_exit);
 	sema_down(&thread_current()->sema_wait);
 

@@ -18,41 +18,45 @@ static const struct page_operations file_ops = {
 void
 vm_file_init (void) {
 }
+
 bool
 file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
-	// printf("File backed initializer\n");
     /* Set up the handler */
     page->operations = &file_ops;
     struct file_page *file_page = &page->file;
     struct file_page *aux = (struct file_page *)page->uninit.aux;
-    // memcpy(&page->file, aux, sizeof(struct file_page));
+
     /* file_page에 aux에 담겨있던 내용을 옮겨준다. */
-    file_page->file = aux->file;
-    file_page->offset = aux->offset;
-    file_page->read_bytes = aux->read_bytes;
-    file_page->zero_bytes = aux->zero_bytes;
-    /* uninit 내의 aux를 file_page 구조체 내에 옮겨주었으므로
-        이 aux에 대해 해제해주어야 한다. */
-    /* TODO: free를 꼭 해주어야 할까? */
-    // free(page->uninit.aux);
+    memcpy(&page->file, aux, sizeof(struct file_page));
+
+    /* file_read를 이곳에서 수행하지 않는 이유? 
+        - do_mmap -> vm_alloc_with_initializer에서 lazy_load_segment를 통해 메모리에 로드한다.
+        - file_read, memset 과정을 lazy_load_segment가 담당한다.*/
+
+    /* load_segment에서 free(aux) 수행 */
     // free(aux);
+
     return true;
 }
+
 /* Swap in the page by read contents from the file. */
 static bool
 file_backed_swap_in (struct page *page, void *kva) {
     struct file_page *file_page UNUSED = &page->file;
 }
+
 /* Swap out the page by writeback contents to the file. */
 static bool
 file_backed_swap_out (struct page *page) {
     struct file_page *file_page UNUSED = &page->file;
 }
+
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void
 file_backed_destroy (struct page *page) {
     struct file_page *file_page UNUSED = &page->file;
     struct thread *curr = thread_current();
+
     /* spt table에서 destroy할 페이지를 삭제한다. */
     // 이거 하면 터짐
     // spt_remove_page(&curr->spt, page);
@@ -63,12 +67,14 @@ file_backed_destroy (struct page *page) {
         file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
         /* write back 되었으므로 더이상 dirty하지 않다. */
         pml4_set_dirty(curr->pml4, page->va, false);
+		pml4_set_accessed(curr->pml4, page->va, false);
         lock_release(&vm_lock);
     }
     /* 파일을 닫는다. */
     lock_acquire(&vm_lock);
     file_close(file_page->file);
     lock_release(&vm_lock);
+
     /* free page는 호출자가 처리해야 한다. 
     ------ 아래 삭제 */
     /* 연결된 물리 프레임에 대해 */
@@ -87,26 +93,21 @@ file_backed_destroy (struct page *page) {
         lock_release(&vm_lock);
     }
 }
+
 /* mmap flow: 
     page fault! ---> mmap() ---> vm_alloc_page() ---> file_backed_initializer() */
 /* Do the mmap */
 void *
 do_mmap (void *addr, size_t length, int writable,
         struct file *file, off_t offset) {
-    // printf(" Do_ mmap !\n");
-    // printf("in buff 32504: %d\n", )
     /* TODO: 유효성 체크는 mmap()에서 */
-    
-    /* file_read를 사용하지 않는 이유
-        - file_reopen으로 페이지 참조 카운트를 하나씩 올려주면서 파일 구조체에 넣어주었다. 
-        - 한 페이지에 달린 file 필드 자체에는 한 개의 파일이 통째로 들어가지만
-        - offset, read_bytes, zero_bytes를 통해 한 개의 파일을 페이지 단위로 잘라줬다고 할 수 있다. */
     
     /* TODO: file_reopen을 몇 번 해줄 것인가?
         (하나의 파일에 대해 여러 페이지가 생성될 때)
         - 한 페이지마다 파일을 reopen할 것인가 (O)
         - 같은 파일에 매핑된 모든 페이지에 대해 파일을 한 번 reopen할 것인가 (X) */
     // file = file_reopen(file);
+
     /* file_length: 794, length: 4096
         - file의 실제 길이와, 내가 매핑하고자 하는 길이가 다르다. */
     // size_t read_bytes = length;
@@ -121,7 +122,7 @@ do_mmap (void *addr, size_t length, int writable,
         - 마지막에 반환되는 값은 round-down된 addr, 즉 실제로 메모리 어디에 매핑되었는지의 주소이다. */
     addr = pg_round_down(addr);
     void *start_addr = addr;
-    /* TODO: ASSERT 추가? */
+
     while (read_bytes > 0 || zero_bytes > 0)
     {   
         /* for. mmap-kernel */
@@ -143,7 +144,8 @@ do_mmap (void *addr, size_t length, int writable,
         aux->file = file_reopen(file);
         // aux->file = file;
         aux->offset = offset;
-        aux->read_bytes = read_bytes;
+        // aux->read_bytes = read_bytes; ---> merge-mm에서 터짐
+        aux->read_bytes = page_read_bytes;
         aux->zero_bytes = page_zero_bytes;
         if (!vm_alloc_page_with_initializer(VM_FILE, addr, writable, lazy_load_segment, aux)) {
             free(aux);
@@ -152,12 +154,13 @@ do_mmap (void *addr, size_t length, int writable,
         // printf("Page 생성됨, 주소: 0x%x\n", addr);
         
         /* 만들어줄 페이지 */
-        /* addr을 밑에서 더해주니까 여기서 find 해야함 */
+        /* 🚫 not present error reading page in user context.
+            - addr을 밑에서 더해주기 전에 find_page를 수행해야 한다. */
         page = spt_find_page(&thread_current()->spt, addr);
         if (page == NULL) {
-            // printf("page is NULL\n");
             return NULL;
         }
+
         read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         addr += PGSIZE;
@@ -173,18 +176,16 @@ do_mmap (void *addr, size_t length, int writable,
 /* Do the munmap */
 void
 do_munmap (void *addr) {
-    // printf("Unmapping......\n");
     /* 시작 주소 addr부터 연속적으로 페이지가 한 파일에 매핑되어 있으므로
         첫 페이지에 저장해놓은 pg_cnt만큼 돌면서 매핑을 해제한다. */
     struct thread *curr = thread_current();
     struct page *page = spt_find_page(&curr->spt, addr);
     struct file_page *file_page  = &page->file;
     int pg_cnt = page->pg_cnt;
+
     for (int i = 0; i < pg_cnt; i++) {
         /* write back */
-        
         if (pml4_is_dirty(curr->pml4, page->va)) {
-            // printf("Trying to write back\n");
             /* 페이지 단위로 파일을 쪼개놨으므로 그만큼만 write back한다. 
                 file_length()를 쓰면 안됨. */
             lock_acquire(&vm_lock);
@@ -193,11 +194,9 @@ do_munmap (void *addr) {
             /* write back 되었으므로 더이상 dirty하지 않다. */
             pml4_set_dirty(curr->pml4, page->va, false);
         }
+
         /* 동일한 파일 내용이라도 서로 다른 물리 프레임에 매핑된다. 
             따라서 munmap시에 연결된 물리 프레임을 해제해주어야 한다. */
-        // --> 아닌듯
-        /* 깃북: 유닉스는 두 매핑이 동일한 물리 페이지를 공유하도록 합니다. */
-        
         if (pml4_get_page(curr->pml4, page->va) != NULL) {
             /* frame_table에서 페이지에 매핑된 프레임을 삭제한다. */
             lock_acquire(&vm_lock);

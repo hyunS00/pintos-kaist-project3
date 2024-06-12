@@ -289,6 +289,8 @@ bitmap_scan (const struct bitmap *b, size_t start, size_t cnt, bool value) {
    If CNT is zero, returns 0.
    Bits are set atomically, but testing bits is not atomic with
    setting them. */
+/* scan으로 사용 가능한 영역 (false)을 찾고
+	해당 영역을 사용중이라고 (true)로 바꾼다. */
 size_t
 bitmap_scan_and_flip (struct bitmap *b, size_t start, size_t cnt, bool value) {
 	size_t idx = bitmap_scan (b, start, cnt, value);

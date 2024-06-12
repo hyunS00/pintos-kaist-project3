@@ -230,7 +230,9 @@ disk_read (struct disk *d, disk_sector_t sec_no, void *buffer) {
    DISK_SECTOR_SIZE bytes.  Returns after the disk has
    acknowledged receiving the data.
    Internally synchronizes accesses to disks, so external
-   per-disk locking is unneeded. */
+   per-disk locking is unneeded. */ 
+/* buffer에 있는 내용을 disk의 sec_no번째에 쓴다.
+	- args: swap_disk, swap_slot, 물리메모리 주소 */
 void
 disk_write (struct disk *d, disk_sector_t sec_no, const void *buffer) {
 	struct channel *c;
