@@ -260,6 +260,7 @@ vm_evict_frame(void)
 	return victim;
 }
 
+/* 할당 가능한 물리 프레임 공간을 얻는다*/
 static struct frame *
 vm_get_frame(void)
 {
@@ -392,7 +393,7 @@ bool vm_claim_page(void *va UNUSED)
 }
 
 /* Claim the PAGE and set up the mmu. */
-/* 물리 프레임 할당 및 페이지 테이블에 저장*/
+/* 할당 가능한 물리 프레임 공간과 가상 페이지를 매핑한다*/
 static bool
 vm_do_claim_page(struct page *page)
 {
@@ -404,7 +405,6 @@ vm_do_claim_page(struct page *page)
 	frame->page = page;
 	page->frame = frame;
 
-	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	struct thread *t = thread_current();
 	void *pml4 = t->pml4;
 	/* page - frame이 매핑되어 있지 않다면 */
@@ -418,8 +418,7 @@ vm_do_claim_page(struct page *page)
 			return false;
 		}
 	}
-	/* 무조건 물리 메모리와 매핑이 되어 있는 경우이다*/
-	/* 따라서 swap_in을 호출할 때 page는 스왑 디스크에 있을 경우가 없다*/
+	/* swap_in을 호출할 때 하드디스크에서 물리 프레임으로 가지고 온다*/
 	return swap_in(page, frame->kva);
 }
 
