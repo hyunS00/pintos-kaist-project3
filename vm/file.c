@@ -62,33 +62,47 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
 /* Swap in the page by read contents from the file. */
 static bool
 file_backed_swap_in (struct page *page, void *kva) {
-	struct file_page *file_page UNUSED = &page->file;
+	struct file_page *file_page = &page->file;
+    return file_backed_initializer(page, VM_FILE, kva);
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool
 file_backed_swap_out (struct page *page) {
-	struct file_page *file_page UNUSED = &page->file;
+    // printf("page out va:0x%x\n",page->va);
+    uint64_t pml4 = thread_current()->pml4;
+    struct file_page *file_page = &page->file;
+
+    lock_acquire(&vm_lock);
+    if (pml4_is_dirty(pml4, page->va)) {
+        file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
+		pml4_set_dirty(pml4, page->va, false);
+    }
+	pml4_clear_page(pml4, page->va);
+
+    lock_release(&vm_lock);
+    page->frame = NULL;
+    return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
 static void file_backed_destroy(struct page *page)
 {
     struct file_page *file_page = &page->file;
-    lock_acquire(&vm_lock);
+    // lock_acquire(&vm_lock);
 
     if (page->frame != NULL) {
         if (pml4_is_dirty(thread_current()->pml4, page->va)) {
             file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
             pml4_set_dirty(thread_current()->pml4, page->va, 0);
-            pml4_set_accessed(thread_current()->pml4, page->va, 0);
         }
-        file_close(file_page->file);
+        pml4_set_accessed(thread_current()->pml4, page->va, 0);
         pml4_clear_page(thread_current()->pml4, page->va);
-        list_remove(&page->frame->frame_elem);
-        palloc_free_page(page->frame->kva);
+        // list_remove(&page->frame->frame_elem);
+        // palloc_free_page(page->frame->kva);
 
-	    lock_release(&vm_lock);
+	    // lock_release(&vm_lock);
+        file_close(file_page->file);
     }
 }
 

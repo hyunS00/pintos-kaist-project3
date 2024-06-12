@@ -92,7 +92,7 @@ static bool anon_swap_out(struct page *page) {
     pml4_clear_page(thread_current()->pml4, page->va);
 
     // 프레임 테이블에서 해당 프레임 제거
-    list_remove(&page->frame->frame_elem);
+    // list_remove(&page->frame->frame_elem);
 
     // 물리 페이지 할당 해제
     // palloc_free_page(page->frame->kva);
@@ -110,8 +110,9 @@ anon_destroy (struct page *page) {
 
 	if (pml4_get_page(pml4, page->va) != NULL) {
 		pml4_clear_page(pml4, page->va);
-		palloc_free_page(page->frame->kva);
-		list_remove(&page->frame->frame_elem);
+		if (page->frame != NULL)
+			palloc_free_page(page->frame->kva);
+			list_remove(&page->frame->frame_elem);
 	}
 	if (anon_page->swap_slot != -1) {
         bitmap_set(swap_table, anon_page->swap_slot, false);

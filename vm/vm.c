@@ -171,56 +171,35 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 
 /* Get the struct frame, that will be evicted. */
 static struct frame *
-vm_get_victim(void)
-{
-	struct frame *victim = NULL;
-	struct list_elem *fe;
-	struct frame *f;
-
-	lock_acquire(&vm_lock);
-
-	if (clock_hand == NULL){
-		clock_hand = list_begin(&frame_table);
-	}
-
-	/* 첫번째 for문 : lru clock부터 리스트 끝까지 돌기*/
-	for (fe = clock_hand; fe != list_tail(&frame_table); fe = list_next(fe)){
-		f = list_entry(fe, struct frame, frame_elem);
-		if (!pml4_is_accessed(thread_current()->pml4, f->page->va)){
-			victim = f;
-			clock_hand = list_remove(fe);
-			if (clock_hand == list_tail(&frame_table)){
-				clock_hand = list_begin(&clock_hand);
-			}
-			goto done;
-		}
-		else {
-			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
-		}
-	}
-
-	/* 두번째 for 문 : 처음부터 lru clock까지 돌기 */
-	for (fe = list_begin(&frame_table); fe != list_next(clock_hand); fe = list_next(fe)){
-		f = list_entry(fe, struct frame, frame_elem);
-		if (!pml4_is_accessed(thread_current()->pml4, f->page->va)){
-			victim = f;
-			clock_hand = list_remove(fe);
-			if (clock_hand == list_tail(&frame_table)){
-				
-				clock_hand = list_begin(&clock_hand);
-			}
-			goto done;
-		}
-		else{
-			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
-		}
-	}
-
-	goto done;
-
-done:
-	lock_release(&vm_lock);
-	return victim;
+vm_get_victim(void) {
+    struct frame *victim = NULL;
+    struct thread *curr = thread_current();
+    struct list_elem *e;
+    /* clock hand가 이상한 곳을 가리키지 않도록 */
+    if (clock_hand == NULL || clock_hand == list_end(&frame_table)) {
+        clock_hand = list_begin(&frame_table);
+    }
+    /* clock_hand가 공유자원이므로 lock을 걸어주어야 한다. */
+    lock_acquire(&vm_lock);
+    /* 1. access == 0인걸 찾는다. */
+    for (e = clock_hand; e != list_end(&frame_table); e = list_next(e)) {
+        struct frame *f = list_entry(clock_hand, struct frame, frame_elem);
+        if (!pml4_is_accessed(curr->pml4, f->page->va)) {
+            victim = f;
+            clock_hand = list_next(clock_hand);
+            lock_release(&vm_lock);
+            // printf("get victim1: 0x%x\n", victim->kva);
+            return victim;
+        }
+        /* 참조 비트를 0으로 설정한다. */
+        pml4_set_accessed(curr->pml4, f->page->va, false);
+    }
+    /* 2. 그래도 없으면 첫 frame */
+    victim = list_entry(list_begin(&frame_table), struct frame, frame_elem);
+    clock_hand = list_next(list_begin(&frame_table));
+    lock_release(&vm_lock);
+    // printf("get victim2: 0x%x\n", victim->kva);
+    return victim;
 }
 
 /* Evict one page and return the corresponding frame.
@@ -240,6 +219,11 @@ vm_evict_frame(void)
             victim = NULL;
         }
     }
+
+	lock_acquire(&vm_lock);
+	list_remove(&victim->frame_elem);
+	lock_release(&vm_lock);
+	
 	return victim;
 }
 
@@ -311,8 +295,10 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	uintptr_t rsp ;
 
 	/* 1. 커널 주소에대한 접근인지 확인한다 */
-	if(is_kernel_vaddr(addr))
+	if(is_kernel_vaddr(addr)) {
+		// printf("여기서 죽엇음 1\n");
 		exit(-1);
+	}
 
 	if(user) {
 		rsp = f->rsp;
@@ -331,11 +317,15 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	addr = pg_round_down(addr);
 	struct page *page = spt_find_page(spt, addr);
 	/* 해당 가상 주소에 대한 페이지가 메모리에 없는 상태*/
-	if (page == NULL)
+	if (page == NULL) {
+		// printf("페이지를 찾을 수 없음: addr=0x%lx\n", (uintptr_t)addr);
 		exit(-1);
+	}
 
-	if(write && !page->writable)
+	if(write && !page->writable) {
+		// printf("여기서 죽엇음 3\n");
 		exit(-1);
+	}
 
 	if (not_present)
 	{
