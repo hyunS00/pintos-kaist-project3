@@ -36,6 +36,7 @@ void syscall_handler(struct intr_frame *);
 void syscall_init(void)
 {
 	lock_init(&filesys_lock);
+	lock_init(&vm_lock);
 
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 |
 							((uint64_t)SEL_KCSEG) << 32);
@@ -239,12 +240,7 @@ int read(int fd, void *buffer, unsigned length)
 
 		struct page *page = spt_find_page(&thread_current()->spt,buffer);
 
-		if(!page){
-			lock_release(&filesys_lock);
-			exit(-1);
-		}
-			
-		if(!page->writable){
+		if(page->writable==0){
 			lock_release(&filesys_lock);
 			exit(-1);
 		}
@@ -258,32 +254,45 @@ int read(int fd, void *buffer, unsigned length)
 
 bool create(const char *file, unsigned initial_size)
 {
-	return filesys_create(file, initial_size);
+	bool success;
+    lock_acquire(&filesys_lock);
+    success = filesys_create(file, initial_size);
+    lock_release(&filesys_lock);
+    return success;
 }
 
 bool remove(const char *file)
-{
-	return filesys_remove(file);
+{	
+	bool success;
+    lock_acquire(&filesys_lock);
+    success = filesys_remove(file);
+    lock_release(&filesys_lock);
+    return success;
 }
 
 int open(const char *file)
 {
-	struct file *param = filesys_open(file);
-	if (param == NULL)
-		return -1;
-	return thread_add_file(param);
+	lock_acquire(&filesys_lock);
+    struct file *param = filesys_open(file);
+    int fd = -1;
+    if (param != NULL)
+        fd = thread_add_file(param);
+    lock_release(&filesys_lock);
+    return fd;
 }
 
 int filesize(int fd)
-{
+{	
 	struct file *param = fd_to_file(fd);
 	return file_length(param);
 }
 
 void seek(int fd, unsigned position)
 {
+	lock_acquire(&filesys_lock);
 	struct file *param = fd_to_file(fd);
 	file_seek(param, position);
+	lock_release(&filesys_lock);
 }
 
 unsigned tell(int fd)
@@ -301,7 +310,9 @@ void close(int fd)
 		exit(-1);
 	thread_current()->fdt[fd] = NULL;
 	thread_current()->nex_fd = fd;
+	lock_acquire(&filesys_lock);
 	file_close(param);
+	lock_release(&filesys_lock);
 }
 
 /* fd -> struct file* */
@@ -344,7 +355,7 @@ int exec(const char *file)
 {
 	char *temp = palloc_get_page(PAL_ZERO);
 	strlcpy(temp, file, strlen(file) + 1);
-	sema_down(&thread_current()->sema_load);
+	// sema_down(&thread_current()->sema_load);
 	return process_exec(temp);
 }
 void *mmap (void *addr, size_t length, int writable, int fd, off_t offset){

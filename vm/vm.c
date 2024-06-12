@@ -7,6 +7,7 @@
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
 #include "lib/string.h"
+static struct frame * vm_get_frame(void);
 
 /* functions added. */
 uint64_t page_hash(const struct hash_elem *p_, void *aux UNUSED);
@@ -33,6 +34,10 @@ void vm_init(void)
 
 	/* init frame_table */
 	list_init(&frame_table);
+	lock_init(&vm_lock);
+	lock_init(&frame_table_lock);
+
+	clock_hand = NULL;
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -141,7 +146,6 @@ spt_find_page(struct supplemental_page_table *spt UNUSED, void *va UNUSED)
 	/* malloc으로 해야 thread_current: is_thread ASSERT 안뜸 */
 	struct page p;
 	struct hash_elem *e;
-
 	/* TODO: Fill this function. */
 
 	/* va가 page의 시작점을 가리키고 있지 않을 수 있으므로
@@ -182,8 +186,61 @@ static struct frame *
 vm_get_victim(void)
 {
 	struct frame *victim = NULL;
-	/* TODO: The policy for eviction is up to you. */
+	struct list_elem *fe;
+	struct frame *f;
+	/* TODO: The policy for eviction is up to you. - Clock Algorithm*/
+	/* while (제거할 페이지를 못찾을때까지 = 리스트 끝까지) {
+		if (현재 페이지의 accessed bit == 0)
+			너가 나가
+		else
+			accessed bit 0으로 세팅
+		clock pointer 옮기기
+	}*/
 
+	lock_acquire(&vm_lock);
+
+	if (clock_hand == NULL){
+		clock_hand = list_begin(&frame_table);
+	}
+
+	/* 첫번째 for문 : lru clock부터 리스트 끝까지 돌기*/
+	for (fe = clock_hand; fe != list_tail(&frame_table); fe = list_next(fe)){
+		f = list_entry(fe, struct frame, frame_elem);
+		if (!pml4_is_accessed(thread_current()->pml4, f->page->va)){
+			victim = f;
+			clock_hand = list_remove(fe);
+			if (clock_hand == list_tail(&frame_table)){
+				clock_hand = list_begin(&clock_hand);
+			}
+			goto done;
+		}
+		else {
+			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
+		}
+	}
+
+
+	/* 두번째 for 문 : 처음부터 lru clock까지 돌기 */
+	for (fe = list_begin(&frame_table); fe != list_next(clock_hand); fe = list_next(fe)){
+		f = list_entry(fe, struct frame, frame_elem);
+		if (!pml4_is_accessed(thread_current()->pml4, f->page->va)){
+			victim = f;
+			clock_hand = list_remove(fe);
+			if (clock_hand == list_tail(&frame_table)){
+				
+				clock_hand = list_begin(&clock_hand);
+			}
+			goto done;
+		}
+		else{
+			pml4_set_accessed(thread_current()->pml4, f->page->va, 0);
+		}
+	}
+
+	goto done;
+
+done:
+	lock_release(&vm_lock);
 	return victim;
 }
 
@@ -192,12 +249,19 @@ vm_get_victim(void)
 static struct frame *
 vm_evict_frame(void)
 {
-	struct frame *victim UNUSED = vm_get_victim();
-	/* TODO: swap out the victim and return the evicted frame. */
-	/* 여기서 swap out 구현 */
-	return NULL;
-}
+	struct frame *victim = NULL;
 
+    while (victim == NULL) {
+        victim = vm_get_victim();
+
+        if (swap_out(victim->page) == false) {
+            // swap_out 실패 시 다른 희생자 선택
+            victim = NULL;
+        }
+    }
+
+	return victim;
+}
 /* palloc() and get frame. If there is no available page, evict the page
  * and return it. This always return valid address. That is, if the user pool
  * memory is full, this function evicts the frame to get the available memory
@@ -207,21 +271,26 @@ vm_get_frame(void)
 {
 	/* TODO: Fill this function. */
 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
+	lock_acquire(&vm_lock);
 	frame->kva = palloc_get_page(PAL_USER);
+	frame->page = NULL;
+	lock_release(&vm_lock);
 
 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
 		일단 PANIC(todo)로 둔다. */
 	if (frame->kva == NULL)
 	{
 		/* vm_evict_frame 호출 */
-		PANIC("todo");
+		frame = vm_evict_frame();
+		frame->page =NULL;
 	}
-
 	ASSERT(frame != NULL);
-	// ASSERT (frame->page == NULL);
+	// ASSERT(frame->page == NULL);
 
 	/* frame table에 생성된 frame을 추가해준다. */
+	lock_acquire(&vm_lock);
 	list_push_front(&frame_table, &frame->frame_elem);
+	lock_release(&vm_lock);
 	return frame;
 }
 
@@ -253,6 +322,7 @@ vm_handle_wp(struct page *page UNUSED)
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 						 bool user UNUSED, bool write UNUSED, bool not_present UNUSED)
 {
+	// printf("=====아니=========\n");
 
 	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
 	uintptr_t rsp;
@@ -269,40 +339,33 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 		exit(-1);
 
 	/* 스택 늘려주기 */
-	// if((USER_STACK - (1 << 20) <= rsp - 8 && rsp - 8 == addr && addr <= USER_STACK) || (USER_STACK - (1 << 20) <= rsp && rsp <= addr && addr <= USER_STACK)) {
-	// 	addr = pg_round_down(addr);
-	// if(USER_STACK - (1 << 20) <= (rsp - 8) && (rsp - 8) <= addr && addr <= USER_STACK){
-	// 	vm_stack_growth(addr);
-		
-	// 	return true;
-	// }
-
 	if (USER_STACK - 0x100000 <= addr && USER_STACK >= addr && rsp - 8 <= addr) {
             vm_stack_growth(addr);
             return true;
     }
+
 	/* spt에서 해당하는 page를 찾아온다. */
 	addr = pg_round_down(addr);
 	struct page *page = spt_find_page(spt, addr);
 	/* 해당 가상 주소에 대한 페이지가 메모리에 없는 상태*/
 	if (page == NULL)
 		exit(-1);
-
 	/* 쓰기로 접근했지만 페이지가 읽기전용일때 exit(-1) */
 	if(write && !page->writable)
-		exit(-1);
 
+		exit(-1);
 	if (not_present)
 	{
 		/* 해당 가상 주소에 대한 페이지는 메모리에 존재하지만, r/o 페이지에 write 시도*/
+
 		return vm_do_claim_page(page);
 	}
-
 	/* 2. Bogus fault인지 확인한다. */
 	/* 2-1. 이미 초기화된 페이지 (즉 UNINIT이 아닌 페이지)에 PF 발생:
 			swap-out된 페이지에 대한 PF이다. */
 	if (page->operations->type != VM_UNINIT || page != NULL)
 	{
+
 		if (vm_do_claim_page(page))
 			return true;
 	}
@@ -312,8 +375,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 
 /* Free the page.
  * DO NOT MODIFY THIS FUNCTION. */
-void vm_dealloc_page(struct page *page)
-{
+void vm_dealloc_page(struct page *page){
 	destroy(page);
 	free(page);
 }
@@ -402,7 +464,9 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
 				{
 					if(aux != NULL) {
 						struct file_page *new_aux = (struct file_page *) malloc(sizeof(struct file_page));
+						lock_acquire(&vm_lock);
 						memcpy(new_aux, aux, sizeof(struct file_page));
+						lock_release(&vm_lock);
 						aux = new_aux;
 					}
 					if (!vm_alloc_page_with_initializer(type, upage, writable, init, aux))
@@ -431,7 +495,9 @@ bool supplemental_page_table_copy(struct supplemental_page_table *dst UNUSED,
             		vm_dealloc_page(dst_page);
 				}
 				dst_page = spt_find_page(&thread_current()->spt, upage);
+				lock_acquire(&vm_lock);
 				memcpy(dst_page->frame->kva, src_page->frame->kva, PGSIZE);
+				lock_release(&vm_lock);
 				break;
 			}
 				break;

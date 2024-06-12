@@ -74,7 +74,12 @@ struct frame {
 	struct list_elem frame_elem;
 };
 
+struct list_elem *clock_hand;
+
 struct list frame_table;
+
+struct lock vm_lock;
+struct lock frame_table_lock;
 
 /* The function table for page operations.
  * This is one way of implementing "interface" in C.

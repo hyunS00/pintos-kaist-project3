@@ -20,6 +20,7 @@ static const struct page_operations file_ops = {
 /* The initializer of file vm */
 void
 vm_file_init (void) {
+	lock_init(&vm_lock);
 }
 
 /* Initialize the file backed page */
@@ -43,12 +44,14 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
     ASSERT(page_read_bytes + page_zero_bytes == PGSIZE);
 
     page->operations = &file_ops;
-	
+	lock_acquire(&vm_lock);
     if (file_read_at(file, kva, page_read_bytes, offset) != (int)page_read_bytes)
     {
 		free(aux);
+		lock_release(&vm_lock);
         return false;
     }
+	lock_release(&vm_lock);
     /* Clear the remaining bytes */
     memset(kva + page_read_bytes, 0, page_zero_bytes);
     free(aux);
@@ -59,13 +62,38 @@ bool file_backed_initializer(struct page *page, enum vm_type type, void *kva)
 static bool
 file_backed_swap_in (struct page *page, void *kva) {
 	struct file_page *file_page UNUSED = &page->file;
-
+    
+    struct file *file = file_page->file;
+    size_t offset = file_page->offset;
+    size_t read_bytes = file_page->read_bytes;
+    size_t zero_bytes = file_page->zero_bytes;
+    
+    file_seek(file, offset);
+    size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+    size_t page_zero_bytes = PGSIZE - page_read_bytes;
+    lock_acquire(&vm_lock);
+    if (file_read(file, kva, page_read_bytes) != (int)page_read_bytes)
+        return false;
+    memset(kva + page_read_bytes, 0, page_zero_bytes);
+    lock_release(&vm_lock);
+    return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
 static bool
 file_backed_swap_out (struct page *page) {
-	struct file_page *file_page UNUSED = &page->file;
+	uint64_t pml4 = thread_current()->pml4;
+	struct file_page *file_page = &page->file;
+
+	lock_acquire(&vm_lock);
+    if (pml4_is_dirty(pml4, page->va)) {
+		file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
+		pml4_set_dirty(pml4, page->va, false);
+    }
+	pml4_clear_page(thread_current()->pml4, page->va); //+
+    page->frame = NULL; // 페이지가 가르키고 있는 프레임을 null
+	lock_release(&vm_lock);
+	return true;
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
@@ -73,14 +101,22 @@ static void
 file_backed_destroy (struct page *page) {
 	uint64_t pml4 = thread_current()->pml4;
 	struct file_page *file_page = &page->file;
-    if (pml4_is_dirty(pml4, page->va)) {
-		// printf("file_destroy: %d\n", &file_page->file);
-		file_write_at(file_page->file, page->va, file_page->read_bytes, file_page->offset);
-    }
-    file_close(file_page->file);
-	pml4_clear_page(pml4,page->va);
-	list_remove(&page->frame->frame_elem); // 프레임 리스트에서 프레임 제거
 
+	lock_acquire(&vm_lock);
+	if(page->frame != NULL){ // swap_out되어서 frame이 NULL일 수 도 있다.
+		
+		if (pml4_is_dirty(pml4, page->va)) {
+			file_write_at(file_page->file, page->frame->kva, file_page->read_bytes, file_page->offset);
+			pml4_set_dirty(pml4, page->va, false);
+		}
+		list_remove(&page->frame->frame_elem); // 프레임 리스트에서 프레임 제거
+		pml4_clear_page(pml4,page->va);
+		palloc_free_page(page->frame->kva);
+	}
+	//pml4_set_accessed(pml4, page->va, false);
+	lock_release(&vm_lock);
+
+    file_close(file_page->file);
 }
 
 /* Do the mmap */
@@ -103,7 +139,7 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 		
 		
-
+		lock_acquire(&vm_lock);
 		/* TODO: Set up aux to pass information to the lazy_load_segment. */
 		struct file_page *aux = malloc(sizeof(struct file_page));
 		if (aux == NULL)
@@ -120,8 +156,10 @@ do_mmap (void *addr, size_t length, int writable, struct file *file, off_t offse
 											writable, NULL, aux))
 		{
 			free(aux);
+			lock_release(&vm_lock);
 			return NULL;
 		}
+		lock_release(&vm_lock);
 		read_bytes -= page_read_bytes;
         zero_bytes -= page_zero_bytes;
         addr += PGSIZE;

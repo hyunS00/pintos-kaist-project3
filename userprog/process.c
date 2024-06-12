@@ -236,7 +236,7 @@ int process_exec(void *f_name)
 	/* And then load the binary */
 	success = load(f_name, &_if);
 
-	sema_up(&thread_current()->sema_load);
+	// sema_up(&thread_current()->sema_load);
 
 	/* If load failed, quit. */
 	palloc_free_page(f_name);
