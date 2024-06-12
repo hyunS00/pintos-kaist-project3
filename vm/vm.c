@@ -234,8 +234,7 @@ void spt_remove_page(struct supplemental_page_table *spt, struct page *page)
 
 /* use only access bit */
 static struct frame *
-vm_get_victim(void)
-{
+vm_get_victim(void) {
 	struct frame *victim = NULL;
 	struct thread *curr = thread_current();
 	struct list_elem *e;
@@ -275,8 +274,7 @@ vm_get_victim(void)
 /* Evict one page and return the corresponding frame.
  * Return NULL on error.*/
 static struct frame *
-vm_evict_frame(void)
-{
+vm_evict_frame(void) {
 	struct frame *victim = NULL;
 
 	while (victim == NULL) {
@@ -373,7 +371,7 @@ vm_handle_wp(struct page *page UNUSED) {
 bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 						 bool user UNUSED, bool write UNUSED, bool not_present UNUSED)
 {
-
+	// printf("Trying to handle fault...\n");
 	struct supplemental_page_table *spt UNUSED = &thread_current()->spt;
 
 	/* TODO: Validate the fault */
@@ -410,7 +408,7 @@ bool vm_try_handle_fault(struct intr_frame *f UNUSED, void *addr UNUSED,
 	if (page == NULL)
 		exit(-1);
 
-	if(write && !page->writable)
+	if (write && !page->writable)
 		exit(-1);
 
 	/* 2. not_present - true: 해당 가상 주소에 대한 페이지가 메모리에 없는 상태 

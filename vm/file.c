@@ -40,15 +40,53 @@ file_backed_initializer (struct page *page, enum vm_type type, void *kva) {
 }
 
 /* Swap in the page by read contents from the file. */
+/* 파일 시스템 -> 물리 메모리 */
 static bool
 file_backed_swap_in (struct page *page, void *kva) {
+    // printf("File-backed Swap in!\n");
+
     struct file_page *file_page UNUSED = &page->file;
+    
+    struct file *file = file_page->file;
+    size_t offset = file_page->offset;
+    size_t read_bytes = file_page->read_bytes;
+    size_t zero_bytes = file_page->zero_bytes;
+	
+    file_seek(file, offset);
+
+    size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+	size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+    lock_acquire(&vm_lock);
+	if (file_read(file, kva, page_read_bytes) != (int)page_read_bytes)
+		return false;
+
+	memset(kva + page_read_bytes, 0, page_zero_bytes);
+	lock_release(&vm_lock);
+
+    return true;
 }
 
 /* Swap out the page by writeback contents to the file. */
+/* 물리 메모리 -> 파일 시스템 */
 static bool
 file_backed_swap_out (struct page *page) {
+    // printf("File-backed Swap out!\n");
+
     struct file_page *file_page UNUSED = &page->file;
+    size_t offset = file_page->offset;
+    size_t read_bytes = file_page->read_bytes;
+
+    struct thread *curr = thread_current();
+    
+    /* write back */
+    if (pml4_is_dirty(curr->pml4, page->va)) {
+        lock_acquire(&vm_lock);
+        file_write_at(file_page->file, page->frame->kva, read_bytes, offset);
+        lock_release(&vm_lock);
+        /* write back 되었으므로 더이상 dirty하지 않다. */
+        pml4_set_dirty(curr->pml4, page->va, false);
+    }
 }
 
 /* Destory the file backed page. PAGE will be freed by the caller. */
@@ -123,8 +161,7 @@ do_mmap (void *addr, size_t length, int writable,
     addr = pg_round_down(addr);
     void *start_addr = addr;
 
-    while (read_bytes > 0 || zero_bytes > 0)
-    {   
+    while (read_bytes > 0 || zero_bytes > 0) {   
         /* for. mmap-kernel */
         /* addr ~ +PGSIZE만큼 공간에 페이지 할당이 가능한지 확인한다. */
         // if (is_kernel_vaddr(addr + PGSIZE))
@@ -173,6 +210,7 @@ do_mmap (void *addr, size_t length, int writable,
     }
     return start_addr;
 }
+
 /* Do the munmap */
 void
 do_munmap (void *addr) {
