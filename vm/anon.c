@@ -51,11 +51,11 @@ anon_swap_in(struct page *page, void *kva)
 	int swap_index = anon_page->swap_slot;
 
 	// 페이지가 스왑 영역에 존재하지 않는 경우
-	if (swap_index == -1)
-	{
-		memset(kva, 0, PGSIZE);
-		return false;
-	}
+	// if (swap_index == -1)
+	// {
+	// 	memset(kva, 0, PGSIZE);
+	// 	return false;
+	// }
 
 	/* 해당 슬롯의 디스크 번호를 반환 */
 	disk_sector_t sector_no = swap_index * per_disk_cnt;
@@ -123,13 +123,15 @@ anon_destroy(struct page *page)
 	pml4_clear_page(pml4, page->va);
 	/* 물리 메모리 할당 해제 */
 	palloc_free_page(page->frame->kva);
-	/* 물리 메모리 관리 list에서 제거 */
-	list_remove(&page->frame->frame_elem);
-
-	/* swap slot에 있을 때 */
-	if (anon_page->swap_slot != -1)
+	/* 아직 swap out 되지 않았다*/
+	if (anon_page->swap_slot == -1)
 	{
-		/* swap slot 사용 가능함으로 바꿈 */
-		bitmap_set(swap_table, anon_page->swap_slot, false);
+		/* 물리 메모리 관리 list에서 제거 */
+		list_remove(&page->frame->frame_elem);
+		return;
 	}
+	/* swap out 된 page를 제거한다.*/
+	/* swap slot 사용 가능함으로 바꿈 */
+	bitmap_set(swap_table, anon_page->swap_slot, false);
+	return;
 }

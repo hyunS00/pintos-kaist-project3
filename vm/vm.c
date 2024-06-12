@@ -240,56 +240,26 @@ done:
 	return victim;
 }
 
-/* Evict one page and return the corresponding frame.
- * Return NULL on error.*/
 static struct frame *
 vm_evict_frame(void)
 {
 	struct frame *victim = NULL;
 	while (victim == NULL)
 	{
+		/* 희생자 선택*/
 		victim = vm_get_victim();
 		if (victim == NULL)
 			return NULL;
+		/* 희생자 swap out 처리*/
 		if (swap_out(victim->page) == false)
 		{
-			// swap_out 실패 시 다른 희생자 선택
+			/* 선택한 희생자 swap out 못 할 시 다른 희생자 선택*/
 			victim = NULL;
 		}
 	}
 	return victim;
 }
 
-/* palloc() and get frame. If there is no available page, evict the page
- * and return it. This always return valid address. That is, if the user pool
- * memory is full, this function evicts the frame to get the available memory
- * space.*/
-// static struct frame *
-// vm_get_frame(void)
-// {
-// 	/* TODO: Fill this function. */
-// 	struct frame *frame = (struct frame *)malloc(sizeof(struct frame));
-// 	/* 커널이 유저 영역에 물리 메모리를 할당한다 */
-// 	frame->kva = palloc_get_page(PAL_USER);
-// 	frame->page = NULL;
-
-// 	/* 할당 가능한 물리 프레임이 없으므로 swap out을 해야 하지만,
-// 		일단 PANIC(todo)로 둔다. */
-// 	if (frame->kva == NULL)
-// 	{
-// 		if (frame = (vm_evict_frame()) == NULL)
-// 		{
-// 			PANIC("swap out 불가능 상태");
-// 		}
-
-// 		frame->page = NULL;
-// 	}
-// 	ASSERT(frame != NULL);
-// 	ASSERT(frame->page == NULL);
-// 	/* frame table에 생성된 frame을 추가해준다. */
-// 	list_push_front(&frame_table, &frame->frame_elem);
-// 	return frame;
-// }
 static struct frame *
 vm_get_frame(void)
 {
@@ -448,6 +418,8 @@ vm_do_claim_page(struct page *page)
 			return false;
 		}
 	}
+	/* 무조건 물리 메모리와 매핑이 되어 있는 경우이다*/
+	/* 따라서 swap_in을 호출할 때 page는 스왑 디스크에 있을 경우가 없다*/
 	return swap_in(page, frame->kva);
 }
 
